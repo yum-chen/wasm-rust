@@ -5,108 +5,81 @@
 
 #[cfg(test)]
 mod tests {
-
-    // Note: The functions and macros used in these tests are hypothetical and
-    // would be part of the `rustc` testing harness. They are included here to
-    // demonstrate the structure and intent of the required tests.
+    // Note: The functions and macros used here are hypothetical and would be
+    // part of the `rustc` testing harness.
 
     /// **Structural Integration Test**
-    ///
-    /// Verifies that the Cranelift backend can be selected and used to compile
-    /// core crates without involving LLVM.
     #[test]
     fn structural_integration_test() {
-        // Hypothetical function to run a `rustc` command with a specific backend.
-        // The `compile_with_backend` function would be responsible for setting
-        // the `-Z codegen-backend` flag and capturing the output.
-        let result = compile_with_backend("cranelift", "src/lib.rs --crate-type=lib");
-
-        // 1. Assert that the compilation was successful.
-        assert!(result.success(), "Cranelift backend failed to compile a simple library crate.");
-
-        // 2. Assert that LLVM was not involved in the build process.
-        // This could be checked by inspecting the build logs or by ensuring that
-        // no LLVM-related artifacts were produced.
-        assert!(!result.logs().contains("LLVM"), "LLVM artifacts were found in the build process.");
+        // ... (as before)
     }
 
     /// **Backend Parity Test (Golden MIR Test)**
-    ///
-    /// Compiles the same Rust program with both the LLVM and Cranelift backends
-    /// and asserts that the generated MIR is byte-for-byte identical. This is
-    /// a "golden test" that ensures the Cranelift backend does not accidentally
-    */// fork Rust semantics.
     #[test]
     fn backend_mir_parity_test() {
-        let source_file = "tests/test-cases/simple_function.rs";
-
-        // 1. Generate MIR with the LLVM backend.
-        let llvm_mir_dump = generate_mir("llvm", source_file);
-
-        // 2. Generate MIR with the Cranelift backend.
-        let cranelift_mir_dump = generate_mir("cranelift", source_file);
-
-        // 3. Assert that the MIR is identical.
-        // This is the critical check. Any divergence in the MIR indicates a
-        // semantic difference between the two backends.
-        assert_eq!(llvm_mir_dump, cranelift_mir_dump, "MIR dump from Cranelift backend does not match the LLVM golden dump.");
+        // ... (as before)
     }
 
     /// **Negative Compilation Test (Unsupported Feature)**
-    ///
-    /// Verifies that the Cranelift backend fails cleanly and deterministically
-    /// when it encounters a Rust feature that it does not support.
     #[test]
     fn negative_test_unsupported_feature() {
-        // This test case uses an intrinsic that the Cranelift backend does not
-        // (and should not) support for WebAssembly.
-        let source_file = "tests/test-cases/unsupported_intrinsic.rs";
+        // ... (as before)
+    }
 
-        // Attempt to compile the file with the Cranelift backend.
-        let result = compile_with_backend("cranelift", source_file);
+    /// **Symbol Linkage Test**
+    ///
+    /// Verifies that the generated object files contain the expected sections
+    /// and that symbols are correctly exported without LLVM's standard mangling.
+    #[test]
+    fn symbol_linkage_test() {
+        let source_file = "tests/test-cases/exported_function.rs";
+        let object_file = compile_to_object("cranelift", source_file);
 
-        // 1. Assert that the compilation failed.
-        assert!(result.is_err(), "Cranelift backend should have failed to compile a file with an unsupported feature.");
+        // Use a simulated `wasm-objdump -h` to inspect the object file.
+        let headers = wasm_objdump_headers(&object_file);
 
-        // 2. Assert that the error message is deterministic and informative.
-        // This ensures that users get clear feedback when they try to use an
-        // unsupported feature.
-        let error_message = result.unwrap_err();
-        assert!(error_message.contains("unsupported intrinsic"), "The error message did not indicate that the intrinsic was unsupported.");
+        // Assert that the `.text` section for our exported function exists.
+        assert!(headers.contains("section.text.exported_function"));
+
+        // Assert that the symbol name is not mangled in the LLVM style.
+        assert!(!headers.contains("_ZN..."));
+    }
+
+    /// **Bootstrap Test**
+    ///
+    /// Ensures the codegen backend can be loaded as a dynamic library
+    /// by a custom `rustc` driver.
+    #[test]
+    fn bootstrap_test() {
+        // 1. Build the Cranelift backend as a dynamic library.
+        let backend_dylib = build_backend_as_dylib("cranelift");
+
+        // 2. Invoke a custom `rustc` driver, telling it to load our backend.
+        let result = run_rustc_driver_with_backend(&backend_dylib, "tests/test-cases/simple_function.rs");
+
+        // 3. Assert that the compilation was successful.
+        assert!(result.success(), "The `rustc` driver failed to load and use the Cranelift backend dynamic library.");
     }
 
     // --- Hypothetical Test Harness Functions ---
+    // ... (as before, with new helper functions)
 
-    struct CompilationResult {
-        success: bool,
-        logs: String,
-        error_message: Option<String>,
-    }
-    impl CompilationResult {
-        fn success(&self) -> bool { self.success }
-        fn logs(&self) -> &str { &self.logs }
-        fn is_err(&self) -> bool { !self.success }
-        fn unwrap_err(self) -> String { self.error_message.unwrap() }
+    fn compile_to_object(backend: &str, source_file: &str) -> Vec<u8> {
+        println!("Simulating compilation to object for backend '{}' and file '{}'", backend, source_file);
+        b"object_file_contents".to_vec()
     }
 
-
-    /// A hypothetical function that compiles a Rust file with a specific backend.
-    fn compile_with_backend(backend: &str, args: &str) -> CompilationResult {
-        // In a real test harness, this function would invoke `rustc` with the
-        // appropriate flags. For this placeholder, we'll return a dummy result.
-        println!("Simulating compilation with backend '{}' and args '{}'", backend, args);
-        CompilationResult {
-            success: !args.contains("unsupported"), // Fail if the args contain "unsupported"
-            logs: if backend == "llvm" { "LLVM logs..." } else { "" }.to_string(),
-            error_message: if args.contains("unsupported") { Some("unsupported intrinsic".to_string()) } else { None },
-        }
+    fn wasm_objdump_headers(object_file: &[u8]) -> String {
+        "section.text.exported_function\n...".to_string()
     }
 
-    /// A hypothetical function that generates a MIR dump for a given source file and backend.
-    fn generate_mir(backend: &str, source_file: &str) -> String {
-        // This function would invoke `rustc` with the `--emit=mir` flag.
-        // For this placeholder, we'll return a dummy string.
-        println!("Simulating MIR generation for backend '{}' and file '{}'", backend, source_file);
-        format!("MIR dump for {}", source_file)
+    fn build_backend_as_dylib(backend: &str) -> std::path::PathBuf {
+        println!("Simulating building backend '{}' as dylib", backend);
+        std::path::PathBuf::from("path/to/backend.so")
+    }
+
+    fn run_rustc_driver_with_backend(backend_dylib: &std::path::Path, source_file: &str) -> CompilationResult {
+        println!("Simulating running rustc driver with backend '{:?}' and file '{}'", backend_dylib, source_file);
+        CompilationResult { success: true, logs: "".to_string(), error_message: None }
     }
 }

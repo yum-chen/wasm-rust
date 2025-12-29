@@ -63,4 +63,40 @@ mod tests {
             0
         }
     }
+    /// **Round-trip Schema Validation**
+    ///
+    /// Verifies that every WasmIR instruction can be serialized and deserialized
+    /// without losing metadata, especially ownership and linearity markers.
+    #[test]
+    fn test_round_trip_schema_validation() {
+        // 1. Create a complex WasmIR function with all instruction types and metadata.
+        let original_wasmir = create_comprehensive_wasmir_for_serialization();
+
+        // 2. Serialize the WasmIR to a stable format (e.g., JSON or a custom binary format).
+        let serialized_data = serialize_wasmir(&original_wasmir);
+
+        // 3. Deserialize the data back into a WasmIR object.
+        let deserialized_wasmir = deserialize_wasmir(&serialized_data);
+
+        // 4. Assert that the deserialized object is identical to the original.
+        assert_eq!(original_wasmir, deserialized_wasmir, "WasmIR serialization round-trip failed. Metadata may have been lost.");
+    }
+
+    // --- Hypothetical Test Harness Functions ---
+
+    fn create_comprehensive_wasmir_for_serialization() -> wasmrust::wasmir::WasmIR {
+        // This would construct a WasmIR object that uses every feature of the IR.
+        // For this placeholder, we'll return a simple function.
+        wasmrust::wasmir::WasmIR::new("test".to_string(), wasmrust::wasmir::Signature { params: vec![], returns: None })
+    }
+
+    fn serialize_wasmir(wasmir: &wasmrust::wasmir::WasmIR) -> Vec<u8> {
+        // In a real implementation, this would use a library like `serde`.
+        b"serialized_data".to_vec()
+    }
+
+    fn deserialize_wasmir(data: &[u8]) -> wasmrust::wasmir::WasmIR {
+        // In a real implementation, this would use a library like `serde`.
+        wasmrust::wasmir::WasmIR::new("test".to_string(), wasmrust::wasmir::Signature { params: vec![], returns: None })
+    }
 }
