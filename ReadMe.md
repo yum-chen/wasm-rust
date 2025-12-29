@@ -203,9 +203,10 @@ wasmrust/
 │   └── cargo-wasm/          # WASM-aware Cargo frontend [planned]
 │
 ├── docs/
+│   ├── PRD-WasmRust.md      # WasmRust Prouct Requirements Document 
+│   ├── TSD-WasmRust.md      # WasmRust Technical Specification Document 
 │   ├── SAFETY.md            # Unsafe invariants per type / crate
 │   ├── compiler-contract.md # Formal compiler ↔ crate contracts
-│   ├── RFCs/
 │   └── architecture/
 │
 └── ReadMe.md
@@ -298,6 +299,6 @@ Native Component Model emission, Cranelift-accelerated builds, and advanced opti
 ## Where to Start
 
 *   📦 Use `crates/wasm` for low-level WASM code today.
-*   📖 Read `docs/RFCs/0001-wasmrust-architecture.md`.
+*   📖 Read tech specs in [`docs/TSD-WasmRust.md`](docs/TSD-WasmRust.md).
 *   🧪 Experiment with Cranelift WASM builds (nightly).
 *   🛠️ Contribute to core abstractions before compiler work.
