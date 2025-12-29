@@ -9,7 +9,8 @@ repository = "https://github.com/wasmrust/wasmrust"
 documentation = "https://docs.wasmrust.org/wasm"
 
 [dependencies]
-# No external dependencies - dependency-free by design
+wasm-macros = { path = "../wasm-macros" }
+# No other external dependencies - dependency-free by design
 
 [features]
 default = []

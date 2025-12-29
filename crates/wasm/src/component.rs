@@ -5,10 +5,58 @@
 //! inter-component communication.
 
 use crate::host::{get_host_capabilities, HostCapabilities};
-use crate::wasmir::{WasmIR, Signature, Type, Instruction, Terminator};
 use core::ptr::NonNull;
 use core::marker::PhantomData;
 use alloc::vec::Vec;
+
+/// Placeholder for Signature type (would be defined in wasmir module)
+#[derive(Debug, Clone)]
+pub struct Signature {
+    pub params: Vec<Type>,
+    pub results: Vec<Type>,
+}
+
+/// Placeholder for Type enum (would be defined in wasmir module)
+#[derive(Debug, Clone)]
+pub enum Type {
+    I32,
+    I64,
+    F32,
+    F64,
+    Void,
+    Struct(Vec<Type>),
+    Array(Box<Type>),
+    Reference(Box<Type>),
+}
+
+/// Placeholder for WasmIR type (would be defined in wasmir module)
+#[derive(Debug, Clone)]
+pub struct WasmIR {
+    pub instructions: Vec<Instruction>,
+    pub signatures: Vec<Signature>,
+}
+
+/// Placeholder for Instruction type (would be defined in wasmir module)
+#[derive(Debug, Clone)]
+pub struct Instruction {
+    pub opcode: String,
+    pub operands: Vec<u32>,
+}
+
+/// Placeholder for Terminator type (would be defined in wasmir module)
+#[derive(Debug, Clone)]
+pub struct Terminator {
+    pub kind: TerminatorKind,
+}
+
+/// Placeholder for TerminatorKind type (would be defined in wasmir module)
+#[derive(Debug, Clone)]
+pub enum TerminatorKind {
+    Return,
+    Branch(u32),
+    Switch(Vec<u32>),
+    Unreachable,
+}
 
 /// Component interface definition
 /// 

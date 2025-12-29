@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "crates/wasm",
+  "crates/wasm-macros",
   "src/backend/cranelift",
   "src/backend/llvm",
 ]

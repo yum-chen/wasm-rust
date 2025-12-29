@@ -10,7 +10,6 @@
 #![feature(coerce_unsized)]
 #![feature(generic_associated_types)]
 #![feature(min_specialization)]
-#![feature(const_fn)]
 #![feature(const_mut_refs)]
 
 extern crate alloc;
@@ -26,8 +25,10 @@ pub mod host;
 pub mod memory;
 pub mod threading;
 pub mod component;
+pub mod gc;
 
 use host::{HostProfile, HostCapabilities, get_host_capabilities};
+use gc::{GcManaged, GcString, GcArray, GcBox};
 
 /// Error types for WASM operations
 #[derive(Debug, Clone, PartialEq, Eq)]

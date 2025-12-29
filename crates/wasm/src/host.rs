@@ -5,7 +5,42 @@
 //! capability detection and graceful fallbacks.
 
 use core::ffi::c_void;
-use crate::InteropError;
+
+/// Error type for interop operations between Rust and host environments
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InteropError {
+    /// Type mismatch between Rust and host
+    TypeMismatch(String),
+    /// Operation is not supported in current host environment
+    UnsupportedOperation,
+    /// Target not found (property, method, etc.)
+    NotFound,
+    /// Access violation or permission denied
+    AccessDenied,
+    /// Memory allocation failure
+    AllocationFailed,
+    /// Invalid argument or parameter
+    InvalidArgument(String),
+    /// Timeout or operation took too long
+    Timeout,
+    /// Generic host environment error
+    HostError(String),
+}
+
+impl core::fmt::Display for InteropError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            InteropError::TypeMismatch(msg) => write!(f, "Type mismatch: {}", msg),
+            InteropError::UnsupportedOperation => write!(f, "Unsupported operation"),
+            InteropError::NotFound => write!(f, "Target not found"),
+            InteropError::AccessDenied => write!(f, "Access denied"),
+            InteropError::AllocationFailed => write!(f, "Memory allocation failed"),
+            InteropError::InvalidArgument(msg) => write!(f, "Invalid argument: {}", msg),
+            InteropError::Timeout => write!(f, "Operation timeout"),
+            InteropError::HostError(msg) => write!(f, "Host error: {}", msg),
+        }
+    }
+}
 
 /// Supported host environments
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
