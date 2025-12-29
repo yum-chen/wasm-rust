@@ -5,6 +5,9 @@
 
 pub mod lib;
 pub mod integration;
+pub mod mir_lowering;
+pub mod thin_monomorphization;
 
 // Re-export main types
 pub use lib::*;
+pub use thin_monomorphization::*;

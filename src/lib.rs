@@ -92,10 +92,21 @@ impl WasmRustCompiler {
     }
 
     /// Converts Rust MIR to WasmIR
-    fn convert_mir_to_wasmir(&self, mir: &Body) -> Result<WasmIR, String> {
-        // This would implement the MIR -> WasmIR conversion
-        // For now, return a placeholder
-        Err("MIR to WasmIR conversion not yet implemented".to_string())
+    fn convert_mir_to_wasmir(&mut self, mir: &Body) -> Result<WasmIR, String> {
+        // Use the MIR lowering module
+        use backend::cranelift::mir_lowering::MirLoweringContext;
+        
+        let mut context = MirLoweringContext::new(self.target.clone(), mir);
+        
+        if let Err(errors) = context.lower_body(mir) {
+            let error_messages: Vec<String> = errors.iter()
+                .map(|e| e.to_string())
+                .collect();
+            Err(format!("MIR lowering failed: {}", error_messages.join("; ")))
+        } else {
+            context.into_wasmir()
+                .map_err(|e| format!("Failed to get WasmIR: {}", e.to_string()))
+        }
     }
 
     /// Gets supported targets

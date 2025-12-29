@@ -16,6 +16,7 @@ use rustc_middle::mir::Body;
 use rustc_middle::ty::TyS;
 use rustc_middle::mir::{BasicBlock, Location};
 use rustc_target::spec::Target;
+pub mod mir_lowering;
 use std::collections::HashMap;
 
 use crate::wasmir::{WasmIR, WasmIRInstruction, WasmIRType};
