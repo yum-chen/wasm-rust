@@ -1,6 +1,6 @@
 ---
 Status: Draft
-Version: 0.0.1.draft.1
+Version: 0.1.0
 Date: 2025-12-29
 Type: Technical Specification Document
 ---
@@ -198,8 +198,110 @@ unsafe impl Pod for f64 {}
 // Complex types require explicit implementation with safety proof
 ```
 
-**Compiler Contract Enforcement**: The compiler may only assume documented invariants and optimize whitelisted MIR patterns as specified in the formal contract.
+#### GC-Native Types for WasmGC
+
+WasmRust provides native garbage-collected types that compile directly to WasmGC instructions:
+
+```rust
+// GC-native types for WasmGC environments
+// These types are only available with #[wasm::gc] attribute
+
+// GcArray: Garbage-collected dynamic array
+#[wasm::gc_type]
+pub struct GcArray<T> {
+    // Opaque handle to WasmGC array
+    handle: wasm::gc::ArrayRef,
+    _marker: PhantomData<T>,
+}
+
+impl<T> GcArray<T> {
+    pub fn new() -> Self { /* ... */ }
+    pub fn with_capacity(cap: usize) -> Self { /* ... */ }
+    pub fn push(&mut self, value: T) { /* ... */ }
+    pub fn get(&self, index: usize) -> Option<&T> { /* ... */ }
+    pub fn len(&self) -> usize { /* ... */ }
+}
+
+// GcString: Garbage-collected string type
+#[wasm::gc_type]
+pub struct GcString {
+    handle: wasm::gc::StringRef,
+}
+
+impl GcString {
+    pub fn new(s: &str) -> Self { /* ... */ }
+    pub fn as_str(&self) -> &str { /* ... */ }
+    pub fn push_str(&mut self, s: &str) { /* ... */ }
+    pub fn len(&self) -> usize { /* ... */ }
+}
+
+// GcBox: Single-value GC container
+#[wasm::gc_type]
+pub struct GcBox<T> {
+    handle: wasm::gc::StructRef,
+    _marker: PhantomData<T>,
+}
+
+impl<T> GcBox<T> {
+    pub fn new(value: T) -> Self { /* ... */ }
+    pub fn get(&self) -> &T { /* ... */ }
+    pub fn get_mut(&mut self) -> &mut T { /* ... */ }
+}
+
+// GcRef: Generic GC reference
+#[wasm::gc_type]
+pub struct GcRef<T> {
+    handle: wasm::gc::AnyRef,
+    _marker: PhantomData<T>,
+}
 ```
+
+#### Dual-Mode Compilation
+
+WasmRust supports both ownership-based and GC-based compilation modes:
+
+```rust
+// Default ownership mode - uses Rust's standard ownership
+fn process_data_ownership(data: Vec<u8>) -> String {
+    // Standard Rust ownership semantics
+    String::from_utf8(data).unwrap()
+}
+
+// GC mode - uses garbage collection
+#[wasm::gc]
+fn process_data_gc(data: GcArray<u8>) -> GcString {
+    // Garbage-collected types, no manual memory management
+    let mut result = GcString::new("");
+    for byte in data.iter() {
+        result.push_str(&format!("{:02x}", byte));
+    }
+    result
+}
+
+// Mixed mode - explicit boundaries between ownership and GC
+fn mixed_processing(input: &str) -> String {
+    // Ownership mode for input processing
+    let processed = input.to_uppercase();
+    
+    // Convert to GC mode for complex operations
+    let gc_data = to_gc_mode(processed);
+    let gc_result = process_with_gc(gc_data);
+    
+    // Convert back to ownership mode for output
+    from_gc_mode(gc_result)
+}
+
+// Conversion functions with explicit boundaries
+fn to_gc_mode(s: String) -> GcString {
+    GcString::new(&s) // Explicit conversion
+}
+
+fn from_gc_mode(gc_s: GcString) -> String {
+    gc_s.as_str().to_owned() // Explicit conversion
+}
+```
+
+**Compiler Contract Enforcement**: The compiler may only assume documented invariants and optimize whitelisted MIR patterns as specified in the formal contract.
 
 #### Linear Types for Resource Management
 
@@ -574,6 +676,34 @@ Based on the prework analysis, the following properties have been identified as 
 ### Property 15: Cross-Language ABI Compatibility  
 *For any* struct marked with `#[repr(C)]`, the memory layout produced by WasmRust should be identical to the layout produced by Clang with equivalent flags
 **Validates: Requirements 8.3**
+
+### Property 16: Dual-Mode Compilation Support
+*For any* Rust code, compiling with and without #[wasm::gc] attribute should produce different compilation modes with ownership vs GC semantics respectively
+**Validates: Requirements 14.1**
+
+### Property 17: Ownership Mode Compatibility
+*For any* standard Rust program, compiling with WasmRust in ownership mode should produce functionally equivalent behavior to rustc
+**Validates: Requirements 14.2**
+
+### Property 18: WasmGC Code Generation
+*For any* code compiled with #[wasm::gc] attribute, the generated WASM bytecode should contain native WasmGC instructions without polyfills
+**Validates: Requirements 14.3, 15.2**
+
+### Property 19: Mixed-Mode Compilation
+*For any* codebase mixing ownership and GC modes, compilation should succeed when explicit conversion boundaries are used and fail when implicit mixing is attempted
+**Validates: Requirements 14.4, 15.4**
+
+### Property 20: GC Environment Adaptation
+*For any* WASM environment, when GC support is unavailable, the compiler should either provide polyfills or emit clear compile-time errors for GC-mode code
+**Validates: Requirements 14.5**
+
+### Property 21: GC Type Safety Enforcement
+*For any* attempt to mix GC and non-GC references without explicit conversion, the compiler should reject the program at compile time with appropriate error messages
+**Validates: Requirements 15.3**
+
+### Property 22: GC Memory Management
+*For any* GC objects in supported environments, memory should be automatically reclaimed when objects become unreachable, with deterministic collection behavior
+**Validates: Requirements 15.5**
 
 <function_calls>
 <invoke name="prework">
