@@ -134,25 +134,80 @@ pub enum Instruction {
     DropObject { object: Operand },
     
     /// Load from ExternRef
-    ExternRefLoad { externref: Operand, field: String },
+    ExternRefLoad { 
+        externref: Operand, 
+        field: String, 
+        field_type: Type,
+    },
     
     /// Store to ExternRef
-    ExternRefStore { externref: Operand, field: String, value: Operand },
+    ExternRefStore { 
+        externref: Operand, 
+        field: String, 
+        value: Operand,
+        field_type: Type,
+    },
     
     /// Call JavaScript method
     JSMethodCall {
         object: Operand,
         method: String,
         args: Vec<Operand>,
+        return_type: Option<Type>,
     },
     
     /// Create function reference
-    MakeFuncRef { function_index: u32 },
+    MakeFuncRef { 
+        function_index: u32,
+        signature: Signature,
+    },
     
     /// Call function through reference
     FuncRefCall {
         funcref: Operand,
         args: Vec<Operand>,
+        signature: Signature,
+    },
+    
+    /// Create new ExternRef from value
+    ExternRefNew { 
+        value: Operand,
+        target_type: Type,
+    },
+    
+    /// Convert ExternRef to internal value
+    ExternRefCast { 
+        externref: Operand,
+        target_type: Type,
+    },
+    
+    /// Check if ExternRef is null
+    ExternRefIsNull { externref: Operand },
+    
+    /// Compare two ExternRefs for equality
+    ExternRefEq { 
+        left: Operand,
+        right: Operand,
+    },
+    
+    /// Create new FuncRef from function index
+    FuncRefNew { function_index: u32 },
+    
+    /// Check if FuncRef is null
+    FuncRefIsNull { funcref: Operand },
+    
+    /// Compare two FuncRefs for equality
+    FuncRefEq { 
+        left: Operand,
+        right: Operand,
+    },
+    
+    /// Dynamic function call through function table
+    CallIndirect {
+        table_index: Operand,
+        function_index: Operand,
+        args: Vec<Operand>,
+        signature: Signature,
     },
     
     /// Atomic operation

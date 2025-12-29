@@ -186,25 +186,24 @@ impl WasmRustCraneliftBackend {
         builder.finalize()?;
         Ok(func)
     }
-
     /// Converts a WasmIR instruction to Cranelift IR
     fn convert_instruction(
         &self,
         builder: &mut FunctionBuilder,
-        instruction: &WasmIRInstruction,
+        instruction: &wasmir::Instruction,
     ) -> Result<Option<Variable>, CodegenError> {
         match instruction {
-            WasmIRInstruction::LocalGet { index } => {
+            wasmir::Instruction::LocalGet { index } => {
                 let local = builder.use_var(*index as usize)?;
                 Ok(Some(local))
             }
-            WasmIRInstruction::LocalSet { index, value } => {
+            wasmir::Instruction::LocalSet { index, value } => {
                 let local = builder.use_var(*index as usize)?;
                 let converted_value = self.convert_operand(builder, value)?;
                 builder.def_var(local, converted_value);
                 Ok(None)
             }
-            WasmIRInstruction::BinaryOp { op, left, right } => {
+            wasmir::Instruction::BinaryOp { op, left, right } => {
                 let left_var = self.convert_operand(builder, left)?;
                 let right_var = self.convert_operand(builder, right)?;
                 let result = match op {
@@ -213,10 +212,32 @@ impl WasmRustCraneliftBackend {
                     wasmir::BinaryOp::Mul => builder.ins().imul(left_var, right_var),
                     wasmir::BinaryOp::Div => builder.ins().sdiv(left_var, right_var),
                     wasmir::BinaryOp::Mod => builder.ins().srem(left_var, right_var),
+                    wasmir::BinaryOp::And => builder.ins().band(left_var, right_var),
+                    wasmir::BinaryOp::Or => builder.ins().bor(left_var, right_var),
+                    wasmir::BinaryOp::Xor => builder.ins().bxor(left_var, right_var),
+                    wasmir::BinaryOp::Shl => builder.ins().ishl(left_var, right_var),
+                    wasmir::BinaryOp::Shr => builder.ins().sshr(left_var, right_var),
+                    wasmir::BinaryOp::Eq => builder.ins().icmp(IntCC::Equal, left_var, right_var),
+                    wasmir::BinaryOp::Ne => builder.ins().icmp(IntCC::NotEqual, left_var, right_var),
+                    wasmir::BinaryOp::Lt => builder.ins().icmp(IntCC::SignedLessThan, left_var, right_var),
+                    wasmir::BinaryOp::Le => builder.ins().icmp(IntCC::SignedLessThanOrEqual, left_var, right_var),
+                    wasmir::BinaryOp::Gt => builder.ins().icmp(IntCC::SignedGreaterThan, left_var, right_var),
+                    wasmir::BinaryOp::Ge => builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, left_var, right_var),
                 };
                 Ok(Some(result))
             }
-            WasmIRInstruction::Call { func_ref, args } => {
+            wasmir::Instruction::UnaryOp { op, value } => {
+                let value_var = self.convert_operand(builder, value)?;
+                let result = match op {
+                    wasmir::UnaryOp::Neg => builder.ins().ineg(value_var),
+                    wasmir::UnaryOp::Not => builder.ins().bnot(value_var),
+                    wasmir::UnaryOp::Clz => builder.ins().clz(value_var),
+                    wasmir::UnaryOp::Ctz => builder.ins().ctz(value_var),
+                    wasmir::UnaryOp::Popcnt => builder.ins().popcnt(value_var),
+                };
+                Ok(Some(result))
+            }
+            wasmir::Instruction::Call { func_ref, args } => {
                 let mut cranelift_args = Vec::new();
                 for arg in args {
                     cranelift_args.push(self.convert_operand(builder, arg)?);
@@ -224,7 +245,7 @@ impl WasmRustCraneliftBackend {
                 let result = builder.ins().call(*func_ref, &cranelift_args);
                 Ok(Some(result))
             }
-            WasmIRInstruction::Return { value } => {
+            wasmir::Instruction::Return { value } => {
                 if let Some(val) = value {
                     let converted_val = self.convert_operand(builder, val)?;
                     builder.ins().return_(&[converted_val]);
@@ -233,24 +254,190 @@ impl WasmRustCraneliftBackend {
                 }
                 Ok(None)
             }
-            WasmIRInstruction::Branch { condition, then_block, else_block } => {
+            wasmir::Instruction::Branch { condition, then_block, else_block } => {
                 let cond_var = self.convert_operand(builder, condition)?;
                 builder.ins().brif(cond_var, *then_block, *else_block);
                 Ok(None)
             }
-            WasmIRInstruction::MemoryLoad { address, ty } => {
+            wasmir::Instruction::Jump { target } => {
+                builder.ins().jump(*target, &[]);
+                Ok(None)
+            }
+            wasmir::Instruction::MemoryLoad { address, ty, align, offset } => {
                 let addr_var = self.convert_operand(builder, address)?;
                 let mem_ty = self.convert_type(ty)?;
-                let result = builder.ins().load(mem_ty, cranelift::MemFlags::new(), addr_var, 0);
+                let mut flags = cranelift::MemFlags::new();
+                if let Some(align_val) = align {
+                    flags.set_aligned(*align_val);
+                }
+                let result = builder.ins().load(mem_ty, flags, addr_var, *offset as i64);
                 Ok(Some(result))
             }
-            WasmIRInstruction::MemoryStore { address, value, ty } => {
+            wasmir::Instruction::MemoryStore { address, value, ty, align, offset } => {
                 let addr_var = self.convert_operand(builder, address)?;
                 let value_var = self.convert_operand(builder, value)?;
                 let mem_ty = self.convert_type(ty)?;
-                builder.ins().store(mem_ty, cranelift::MemFlags::new(), value_var, addr_var, 0);
+                let mut flags = cranelift::MemFlags::new();
+                if let Some(align_val) = align {
+                    flags.set_aligned(*align_val);
+                }
+                builder.ins().store(mem_ty, flags, value_var, addr_var, *offset as i64);
                 Ok(None)
             }
+            wasmir::Instruction::MemoryAlloc { size, align } => {
+                let size_var = self.convert_operand(builder, size)?;
+                let result = if let Some(align_val) = align {
+                    builder.ins().heap_alloc(size_var, *align_val as i64)
+                } else {
+                    builder.ins().heap_alloc(size_var, 8) // Default alignment
+                };
+                Ok(Some(result))
+            }
+            wasmir::Instruction::MemoryFree { address } => {
+                let addr_var = self.convert_operand(builder, address)?;
+                builder.ins().heap_free(addr_var);
+                Ok(None)
+            }
+            
+            // ExternRef operations
+            wasmir::Instruction::ExternRefLoad { externref, field, field_type } => {
+                let externref_var = self.convert_operand(builder, externref)?;
+                let field_str = builder.ins().iconst(field.len() as i64);
+                let field_ptr = builder.ins().string_malloc(field_str);
+                let result = self.generate_js_property_load(builder, externref_var, field_ptr, field_type)?;
+                Ok(Some(result))
+            }
+            wasmir::Instruction::ExternRefStore { externref, field, value, field_type } => {
+                let externref_var = self.convert_operand(builder, externref)?;
+                let value_var = self.convert_operand(builder, value)?;
+                let field_str = builder.ins().iconst(field.len() as i64);
+                let field_ptr = builder.ins().string_malloc(field_str);
+                self.generate_js_property_store(builder, externref_var, field_ptr, value_var, field_type)?;
+                Ok(None)
+            }
+            wasmir::Instruction::JSMethodCall { object, method, args, return_type } => {
+                let object_var = self.convert_operand(builder, object)?;
+                let mut cranelift_args = Vec::new();
+                for arg in args {
+                    cranelift_args.push(self.convert_operand(builder, arg)?);
+                }
+                let method_str = builder.ins().iconst(method.len() as i64);
+                let method_ptr = builder.ins().string_malloc(method_str);
+                let result = self.generate_js_method_call(builder, object_var, method_ptr, &cranelift_args, return_type)?;
+                Ok(Some(result))
+            }
+            wasmir::Instruction::ExternRefNew { value, target_type } => {
+                let value_var = self.convert_operand(builder, value)?;
+                let result = self.generate_externref_new(builder, value_var, target_type)?;
+                Ok(Some(result))
+            }
+            wasmir::Instruction::ExternRefCast { externref, target_type } => {
+                let externref_var = self.convert_operand(builder, externref)?;
+                let result = self.generate_externref_cast(builder, externref_var, target_type)?;
+                Ok(Some(result))
+            }
+            wasmir::Instruction::ExternRefIsNull { externref } => {
+                let externref_var = self.convert_operand(builder, externref)?;
+                let result = self.generate_externref_is_null(builder, externref_var)?;
+                Ok(Some(result))
+            }
+            wasmir::Instruction::ExternRefEq { left, right } => {
+                let left_var = self.convert_operand(builder, left)?;
+                let right_var = self.convert_operand(builder, right)?;
+                let result = self.generate_externref_eq(builder, left_var, right_var)?;
+                Ok(Some(result))
+            }
+            
+            // FuncRef operations
+            wasmir::Instruction::MakeFuncRef { function_index, signature } => {
+                let result = self.generate_funcref_new(builder, *function_index)?;
+                Ok(Some(result))
+            }
+            wasmir::Instruction::FuncRefNew { function_index } => {
+                let result = self.generate_funcref_new(builder, *function_index)?;
+                Ok(Some(result))
+            }
+            wasmir::Instruction::FuncRefIsNull { funcref } => {
+                let funcref_var = self.convert_operand(builder, funcref)?;
+                let result = self.generate_funcref_is_null(builder, funcref_var)?;
+                Ok(Some(result))
+            }
+            wasmir::Instruction::FuncRefEq { left, right } => {
+                let left_var = self.convert_operand(builder, left)?;
+                let right_var = self.convert_operand(builder, right)?;
+                let result = self.generate_funcref_eq(builder, left_var, right_var)?;
+                Ok(Some(result))
+            }
+            wasmir::Instruction::FuncRefCall { funcref, args, signature } => {
+                let funcref_var = self.convert_operand(builder, funcref)?;
+                let mut cranelift_args = Vec::new();
+                for arg in args {
+                    cranelift_args.push(self.convert_operand(builder, arg)?);
+                }
+                let result = self.generate_funcref_call(builder, funcref_var, &cranelift_args, signature)?;
+                Ok(Some(result))
+            }
+            wasmir::Instruction::CallIndirect { table_index, function_index, args, signature } => {
+                let table_var = self.convert_operand(builder, table_index)?;
+                let func_var = self.convert_operand(builder, function_index)?;
+                let mut cranelift_args = Vec::new();
+                for arg in args {
+                    cranelift_args.push(self.convert_operand(builder, arg)?);
+                }
+                let result = self.generate_indirect_call(builder, table_var, func_var, &cranelift_args, signature)?;
+                Ok(Some(result))
+            }
+            
+            // Linear type operations
+            wasmir::Instruction::LinearOp { op, value } => {
+                let value_var = self.convert_operand(builder, value)?;
+                match op {
+                    wasmir::LinearOp::Consume => {
+                        self.handle_linear_consume(builder, value_var)?;
+                    }
+                    wasmir::LinearOp::Move => {
+                        // Linear types are always moved in WasmIR
+                    }
+                    wasmir::LinearOp::Clone => {
+                        return Err(CodegenError::Unsupported("Cannot clone linear type"));
+                    }
+                    wasmir::LinearOp::Drop => {
+                        self.handle_linear_drop(builder, value_var)?;
+                    }
+                }
+                Ok(Some(value_var))
+            }
+            
+            // Atomic operations
+            wasmir::Instruction::AtomicOp { op, address, value, order } => {
+                let addr_var = self.convert_operand(builder, address)?;
+                let value_var = self.convert_operand(builder, value)?;
+                let result = match op {
+                    wasmir::AtomicOp::Add => self.generate_atomic_add(builder, addr_var, value_var, order)?,
+                    wasmir::AtomicOp::Sub => self.generate_atomic_sub(builder, addr_var, value_var, order)?,
+                    wasmir::AtomicOp::And => self.generate_atomic_and(builder, addr_var, value_var, order)?,
+                    wasmir::AtomicOp::Or => self.generate_atomic_or(builder, addr_var, value_var, order)?,
+                    wasmir::AtomicOp::Xor => self.generate_atomic_xor(builder, addr_var, value_var, order)?,
+                    wasmir::AtomicOp::Exchange => self.generate_atomic_exchange(builder, addr_var, value_var, order)?,
+                };
+                Ok(Some(result))
+            }
+            wasmir::Instruction::CompareExchange { address, expected, new_value, order } => {
+                let addr_var = self.convert_operand(builder, address)?;
+                let expected_var = self.convert_operand(builder, expected)?;
+                let new_value_var = self.convert_operand(builder, new_value)?;
+                let (result, success) = self.generate_compare_exchange(builder, addr_var, expected_var, new_value_var, order)?;
+                Ok(Some(result))
+            }
+            
+            // Capability checks
+            wasmir::Instruction::CapabilityCheck { capability } => {
+                self.generate_capability_check(builder, capability)?;
+                Ok(None)
+            }
+            
+            wasmir::Instruction::Nop => Ok(None),
+            
             _ => Ok(None),
         }
     }
@@ -394,6 +581,451 @@ impl WasmRustCraneliftBackend {
         let mut hasher = DefaultHasher::new();
         wasmir_func.hash(&mut hasher);
         hasher.finish()
+    }
+
+    // ExternRef operation implementations
+    
+    /// Generates JavaScript property load
+    fn generate_js_property_load(
+        &self,
+        builder: &mut FunctionBuilder,
+        externref: Variable,
+        field_ptr: Variable,
+        field_type: &wasmir::Type,
+    ) -> Result<Variable, CodegenError> {
+        // This would generate a call to JavaScript runtime to load a property
+        // For now, return a placeholder implementation
+        
+        // In a full implementation, this would:
+        // 1. Call JavaScript runtime with externref and field name
+        // 2. Handle type conversion from JavaScript to WASM
+        // 3. Return the loaded value as appropriate WASM type
+        
+        let target_type = self.convert_type(field_type)?;
+        let result = builder.ins().iconst(0); // Placeholder
+        
+        Ok(result)
+    }
+
+    /// Generates JavaScript property store
+    fn generate_js_property_store(
+        &self,
+        builder: &mut FunctionBuilder,
+        externref: Variable,
+        field_ptr: Variable,
+        value: Variable,
+        field_type: &wasmir::Type,
+    ) -> Result<(), CodegenError> {
+        // This would generate a call to JavaScript runtime to store a property
+        // For now, this is a placeholder implementation
+        
+        // In a full implementation, this would:
+        // 1. Convert WASM value to appropriate JavaScript type
+        // 2. Call JavaScript runtime with externref, field name, and value
+        // 3. Handle any type conversion errors
+        
+        Ok(())
+    }
+
+    /// Generates JavaScript method call
+    fn generate_js_method_call(
+        &self,
+        builder: &mut FunctionBuilder,
+        object: Variable,
+        method_ptr: Variable,
+        args: &[Variable],
+        return_type: &Option<wasmir::Type>,
+    ) -> Result<Variable, CodegenError> {
+        // This would generate a call to JavaScript runtime to invoke a method
+        // For now, return a placeholder implementation
+        
+        // In a full implementation, this would:
+        // 1. Convert all arguments to appropriate JavaScript types
+        // 2. Call JavaScript runtime with object, method name, and arguments
+        // 3. Handle return value conversion from JavaScript to WASM
+        // 4. Handle exceptions and errors appropriately
+        
+        let result = if let Some(ret_type) = return_type {
+            let target_type = self.convert_type(ret_type)?;
+            builder.ins().iconst(0) // Placeholder
+        } else {
+            builder.ins().iconst(0) // Void function returns nothing
+        };
+        
+        Ok(result)
+    }
+
+    /// Generates ExternRef creation from value
+    fn generate_externref_new(
+        &self,
+        builder: &mut FunctionBuilder,
+        value: Variable,
+        target_type: &wasmir::Type,
+    ) -> Result<Variable, CodegenError> {
+        // This would generate JavaScript runtime call to create ExternRef
+        // For now, return a placeholder implementation
+        
+        // In a full implementation, this would:
+        // 1. Convert WASM value to appropriate JavaScript type
+        // 2. Call JavaScript runtime to create JavaScript object
+        // 3. Return the JavaScript object as ExternRef
+        
+        let result = builder.ins().iconst(0); // Placeholder ExternRef
+        Ok(result)
+    }
+
+    /// Generates ExternRef cast operation
+    fn generate_externref_cast(
+        &self,
+        builder: &mut FunctionBuilder,
+        externref: Variable,
+        target_type: &wasmir::Type,
+    ) -> Result<Variable, CodegenError> {
+        // This would generate JavaScript runtime call to cast ExternRef
+        // For now, return a placeholder implementation
+        
+        // In a full implementation, this would:
+        // 1. Validate that the cast is safe
+        // 2. Call JavaScript runtime to perform the cast
+        // 3. Return the casted value as appropriate WASM type
+        
+        let target_type = self.convert_type(target_type)?;
+        let result = builder.ins().iconst(0); // Placeholder
+        Ok(result)
+    }
+
+    /// Generates ExternRef null check
+    fn generate_externref_is_null(
+        &self,
+        builder: &mut FunctionBuilder,
+        externref: Variable,
+    ) -> Result<Variable, CodegenError> {
+        // This would generate JavaScript runtime call to check if ExternRef is null
+        // For now, return a placeholder implementation
+        
+        // In a full implementation, this would:
+        // 1. Call JavaScript runtime with ExternRef
+        // 2. Return boolean indicating if the reference is null
+        
+        let result = builder.ins().icmp(IntCC::Equal, externref, builder.ins().iconst(0));
+        Ok(result)
+    }
+
+    /// Generates ExternRef equality comparison
+    fn generate_externref_eq(
+        &self,
+        builder: &mut FunctionBuilder,
+        left: Variable,
+        right: Variable,
+    ) -> Result<Variable, CodegenError> {
+        // This would generate JavaScript runtime call to compare ExternRefs
+        // For now, return a placeholder implementation
+        
+        // In a full implementation, this would:
+        // 1. Call JavaScript runtime with both ExternRefs
+        // 2. Return boolean indicating if they are equal
+        
+        let result = builder.ins().icmp(IntCC::Equal, left, right);
+        Ok(result)
+    }
+
+    // FuncRef operation implementations
+    
+    /// Generates FuncRef creation from function index
+    fn generate_funcref_new(
+        &self,
+        builder: &mut FunctionBuilder,
+        function_index: u32,
+    ) -> Result<Variable, CodegenError> {
+        // This would generate WASM instruction to create function reference
+        // For now, return a placeholder implementation
+        
+        // In a full implementation, this would:
+        // 1. Use WASM ref.func instruction to create function reference
+        // 2. Return the function reference
+        
+        let result = builder.ins().iconst(function_index as i64); // Placeholder
+        Ok(result)
+    }
+
+    /// Generates FuncRef null check
+    fn generate_funcref_is_null(
+        &self,
+        builder: &mut FunctionBuilder,
+        funcref: Variable,
+    ) -> Result<Variable, CodegenError> {
+        // This would generate WASM instruction to check if FuncRef is null
+        // For now, return a placeholder implementation
+        
+        // In a full implementation, this would:
+        // 1. Use WASM ref.is_null instruction
+        // 2. Return boolean indicating if the function reference is null
+        
+        let result = builder.ins().icmp(IntCC::Equal, funcref, builder.ins().iconst(0));
+        Ok(result)
+    }
+
+    /// Generates FuncRef equality comparison
+    fn generate_funcref_eq(
+        &self,
+        builder: &mut FunctionBuilder,
+        left: Variable,
+        right: Variable,
+    ) -> Result<Variable, CodegenError> {
+        // This would generate WASM instruction to compare FuncRefs
+        // For now, return a placeholder implementation
+        
+        // In a full implementation, this would:
+        // 1. Use WASM ref.eq instruction
+        // 2. Return boolean indicating if they are equal
+        
+        let result = builder.ins().icmp(IntCC::Equal, left, right);
+        Ok(result)
+    }
+
+    /// Generates function call through FuncRef
+    fn generate_funcref_call(
+        &self,
+        builder: &mut FunctionBuilder,
+        funcref: Variable,
+        args: &[Variable],
+        signature: &wasmir::Signature,
+    ) -> Result<Variable, CodegenError> {
+        // This would generate WASM instruction to call through function reference
+        // For now, return a placeholder implementation
+        
+        // In a full implementation, this would:
+        // 1. Validate signature compatibility
+        // 2. Use WASM call_ref instruction
+        // 3. Handle return value appropriately
+        
+        // For now, just return a placeholder
+        let result = builder.ins().iconst(0);
+        Ok(result)
+    }
+
+    /// Generates indirect function call through function table
+    fn generate_indirect_call(
+        &self,
+        builder: &mut FunctionBuilder,
+        table_index: Variable,
+        function_index: Variable,
+        args: &[Variable],
+        signature: &wasmir::Signature,
+    ) -> Result<Variable, CodegenError> {
+        // This would generate WASM instruction for indirect call
+        // For now, return a placeholder implementation
+        
+        // In a full implementation, this would:
+        // 1. Validate function table bounds
+        // 2. Use WASM call_indirect instruction
+        // 3. Handle signature validation
+        // 4. Return the result of the called function
+        
+        let result = builder.ins().iconst(0);
+        Ok(result)
+    }
+
+    // Linear type operation implementations
+    
+    /// Handles linear type consumption
+    fn handle_linear_consume(
+        &self,
+        builder: &mut FunctionBuilder,
+        value: Variable,
+    ) -> Result<(), CodegenError> {
+        // This would generate code to consume a linear type
+        // Linear types must be used exactly once
+        
+        // In a full implementation, this would:
+        // 1. Mark the value as consumed in ownership tracking
+        // 2. Generate any necessary cleanup code
+        // 3. Validate that the value hasn't been consumed before
+        
+        Ok(())
+    }
+
+    /// Handles linear type drop
+    fn handle_linear_drop(
+        &self,
+        builder: &mut FunctionBuilder,
+        value: Variable,
+    ) -> Result<(), CodegenError> {
+        // This would generate code to drop a linear type
+        // Linear types cannot be dropped without being consumed
+        
+        // In a full implementation, this would:
+        // 1. Generate error for attempting to drop linear type
+        // 2. Or handle special cases where dropping is allowed
+        
+        Err(CodegenError::Unsupported("Cannot drop linear type without consuming"))
+    }
+
+    // Atomic operation implementations
+    
+    /// Generates atomic add operation
+    fn generate_atomic_add(
+        &self,
+        builder: &mut FunctionBuilder,
+        address: Variable,
+        value: Variable,
+        order: &wasmir::MemoryOrder,
+    ) -> Result<Variable, CodegenError> {
+        // This would generate WASM atomic.add instruction
+        // For now, return a placeholder implementation
+        
+        let flags = self.convert_memory_order(order)?;
+        let result = builder.ins().atomic_rmw(AtomicRmwOp::Add, types::I32, flags, address, value);
+        Ok(result)
+    }
+
+    /// Generates atomic sub operation
+    fn generate_atomic_sub(
+        &self,
+        builder: &mut FunctionBuilder,
+        address: Variable,
+        value: Variable,
+        order: &wasmir::MemoryOrder,
+    ) -> Result<Variable, CodegenError> {
+        let flags = self.convert_memory_order(order)?;
+        let result = builder.ins().atomic_rmw(AtomicRmwOp::Sub, types::I32, flags, address, value);
+        Ok(result)
+    }
+
+    /// Generates atomic and operation
+    fn generate_atomic_and(
+        &self,
+        builder: &mut FunctionBuilder,
+        address: Variable,
+        value: Variable,
+        order: &wasmir::MemoryOrder,
+    ) -> Result<Variable, CodegenError> {
+        let flags = self.convert_memory_order(order)?;
+        let result = builder.ins().atomic_rmw(AtomicRmwOp::And, types::I32, flags, address, value);
+        Ok(result)
+    }
+
+    /// Generates atomic or operation
+    fn generate_atomic_or(
+        &self,
+        builder: &mut FunctionBuilder,
+        address: Variable,
+        value: Variable,
+        order: &wasmir::MemoryOrder,
+    ) -> Result<Variable, CodegenError> {
+        let flags = self.convert_memory_order(order)?;
+        let result = builder.ins().atomic_rmw(AtomicRmwOp::Or, types::I32, flags, address, value);
+        Ok(result)
+    }
+
+    /// Generates atomic xor operation
+    fn generate_atomic_xor(
+        &self,
+        builder: &mut FunctionBuilder,
+        address: Variable,
+        value: Variable,
+        order: &wasmir::MemoryOrder,
+    ) -> Result<Variable, CodegenError> {
+        let flags = self.convert_memory_order(order)?;
+        let result = builder.ins().atomic_rmw(AtomicRmwOp::Xor, types::I32, flags, address, value);
+        Ok(result)
+    }
+
+    /// Generates atomic exchange operation
+    fn generate_atomic_exchange(
+        &self,
+        builder: &mut FunctionBuilder,
+        address: Variable,
+        value: Variable,
+        order: &wasmir::MemoryOrder,
+    ) -> Result<Variable, CodegenError> {
+        let flags = self.convert_memory_order(order)?;
+        let result = builder.ins().atomic_rmw(AtomicRmwOp::Xchg, types::I32, flags, address, value);
+        Ok(result)
+    }
+
+    /// Generates atomic compare and exchange operation
+    fn generate_compare_exchange(
+        &self,
+        builder: &mut FunctionBuilder,
+        address: Variable,
+        expected: Variable,
+        new_value: Variable,
+        order: &wasmir::MemoryOrder,
+    ) -> Result<(Variable, Variable), CodegenError> {
+        // This would generate WASM atomic.rmw.cmpxchg instruction
+        // For now, return placeholder implementations
+        
+        let flags = self.convert_memory_order(order)?;
+        let (result, success) = builder.ins().atomic_cas(types::I32, flags, address, expected, new_value);
+        Ok((result, success))
+    }
+
+    /// Converts WasmIR memory order to Cranelift memory order
+    fn convert_memory_order(
+        &self,
+        order: &wasmir::MemoryOrder,
+    ) -> Result<MemFlags, CodegenError> {
+        let mut flags = MemFlags::new();
+        
+        match order {
+            wasmir::MemoryOrder::Relaxed => {
+                // No additional flags needed for relaxed
+            }
+            wasmir::MemoryOrder::Acquire => {
+                flags.set_notrap();
+            }
+            wasmir::MemoryOrder::Release => {
+                flags.set_notrap();
+            }
+            wasmir::MemoryOrder::AcqRel => {
+                flags.set_notrap();
+            }
+            wasmir::MemoryOrder::SeqCst => {
+                flags.set_notrap();
+                flags.set_aligned();
+            }
+        }
+        
+        Ok(flags)
+    }
+
+    /// Generates capability check
+    fn generate_capability_check(
+        &self,
+        builder: &mut FunctionBuilder,
+        capability: &wasmir::Capability,
+    ) -> Result<(), CodegenError> {
+        // This would generate runtime capability check
+        // For now, this is a placeholder implementation
+        
+        // In a full implementation, this would:
+        // 1. Check if the current runtime has the required capability
+        // 2. Generate appropriate error if capability is missing
+        // 3. Optimize away checks for guaranteed capabilities
+        
+        match capability {
+            wasmir::Capability::JsInterop => {
+                // Check JavaScript interop capability
+            }
+            wasmir::Capability::Threading => {
+                // Check threading capability
+            }
+            wasmir::Capability::AtomicMemory => {
+                // Check atomic memory capability
+            }
+            wasmir::Capability::ComponentModel => {
+                // Check component model capability
+            }
+            wasmir::Capability::MemoryRegion(region) => {
+                // Check memory region access
+            }
+            wasmir::Capability::Custom(name) => {
+                // Check custom capability
+            }
+        }
+        
+        Ok(())
     }
 }
 

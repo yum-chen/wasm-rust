@@ -1,0 +1,141 @@
+name: MIR Parity Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  mir-parity:
+    name: Test MIR Parity Between Backends
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+        
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+        
+    - name: Cache cargo index
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+        
+    - name: Cache cargo build
+      uses: actions/cache@v3
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake ninja-build clang llvm-dev
+        
+    - name: Build WasmRust
+      run: |
+        cargo build --verbose
+        cargo build --release --verbose
+
+    - name: Generate test cases
+      run: |
+        mkdir -p tests/mir-dumps
+        cargo test --test generate_test_cases --features test-utils -- --nocapture
+
+    - name: Compile with LLVM backend (baseline)
+      run: |
+        mkdir -p tests/llvm-output
+        cargo run --bin wasmrust -- --backend llvm --output-dir tests/llvm-output tests/mir-dumps/*.mir
+
+    - name: Compile with Cranelift backend
+      run: |
+        mkdir -p tests/cranelift-output
+        cargo run --bin wasmrust -- --backend cranelift --output-dir tests/cranelift-output tests/mir-dumps/*.mir
+
+    - name: Compare MIR dumps
+      run: |
+        python3 scripts/compare_mir_dumps.py \
+          --llvm-dir tests/llvm-output \
+          --cranelift-dir tests/cranelift-output \
+          --output tests/mir-comparison.json
+
+    - name: Validate behavioral equivalence
+      run: |
+        cargo test --test behavioral_equivalence --features test-utils
+
+    - name: Upload MIR comparison results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: mir-comparison-results
+        path: |
+          tests/mir-comparison.json
+          tests/llvm-output/
+          tests/cranelift-output/
+
+    - name: Check for parity failures
+      run: |
+        python3 scripts/check_mir_parity.py --input tests/mir-comparison.json --threshold 0.95
+
+  differential-execution:
+    name: Test Behavioral Equivalence
+    runs-on: ubuntu-latest
+    needs: mir-parity
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+        
+    - name: Download artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: mir-comparison-results
+        path: artifacts/
+
+    - name: Extract compiled outputs
+      run: |
+        tar -xzf artifacts/llvm-output.tar.gz -C tests/
+        tar -xzf artifacts/cranelift-output.tar.gz -C tests/
+
+    - name: Run differential execution tests
+      run: |
+        cargo test --test differential_execution --features test-utils -- --nocapture
+
+    - name: Test WASM execution equivalence
+      run: |
+        for wasm_file in tests/llvm-output/*.wasm tests/cranelift-output/*.wasm; do
+          echo "Testing $wasm_file"
+          node tests/run_wasm.js "$wasm_file"
+        done
+
+    - name: Generate parity report
+      run: |
+        python3 scripts/generate_parity_report.py \
+          --llvm-dir tests/llvm-output \
+          --cranelift-dir tests/cranelift-output \
+          --output tests/parity-report.md
+
+    - name: Upload parity report
+      uses: actions/upload-artifact@v3
+      with:
+        name: parity-report
+        path: tests/parity-report.md
