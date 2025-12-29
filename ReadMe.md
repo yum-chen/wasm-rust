@@ -1,11 +1,16 @@
-# WasmRust — Rust-to-WebAssembly Compiler
+# WasmRust
 
-**WasmRust** is a research-driven, production-oriented Rust-to-WebAssembly compilation system. It aims to make **Rust truly WASM-native**, not merely a language that targets WebAssembly.
+> Native Rust for Systems, GC-Ready Rust for WebAssembly
 
-WasmRust extends Rust through **minimal, evidence-based compiler and library enhancements**, closing gaps in binary size, compilation speed, component interoperability, and host friction — all while preserving Rust’s safety guarantees.
+## Overview
 
-> **Core Principle:**
-> WasmRust = rustc + WASM specialization, not a new language.
+**WasmRust is not just "Rust → WASM tooling."**
+It represents a **systems-grade Rust specialization** that treats **WebAssembly as a first-class target machine**, not merely a secondary compilation backend.
+
+> **Native Rust for systems.
+> GC-ready Rust for WebAssembly.**
+
+WasmRust maintains full compatibility with **standard Rust semantics, tooling, and ecosystem**, while enabling **WASM-native execution models** — including future **WasmGC** support — without requiring a new language or a fork of Rust.
 
 ---
 
@@ -25,42 +30,200 @@ WasmRust asks:
 
 ---
 
+## What Problem Does WasmRust Solve?
+
+Rust excels in traditional systems programming domains:
+* Native systems development
+* Zero-cost abstractions
+* Memory safety without garbage collection
+
+However, WebAssembly introduces unique execution characteristics:
+* Reference types (`externref`, `funcref`)
+* Linear memory regions
+* Component Model ABIs
+* Streaming compilation requirements
+* Optional garbage collection (WasmGC)
+
+Conventional Rust→WASM compilation pipelines **often erase these semantics prematurely**, resulting in:
+* Heavy JavaScript glue code
+* Runtime indirection overhead
+* Lost optimization opportunities
+* Slow development iteration cycles
+
+**WasmRust addresses these issues by aligning Rust's compilation model with the WebAssembly virtual machine.**
+---
+
 ## What Is WasmRust?
 
-WasmRust is a **specialized Rust toolchain** that keeps the Rust frontend unchanged (parser, HIR, MIR, borrow checker) and augments code generation for WASM, providing library-level primitives that map directly to WASM concepts.
+WasmRust is a **Rust compiler extension + crate ecosystem** that provides:
 
-```text
-┌─────────────────────────────────────────────┐
-│                 rustc frontend              │
-│   (parsing, HIR, MIR, borrow checking)       │
-│                 UNCHANGED                   │
-└───────────────────┬─────────────────────────┘
-                    ▼
-┌─────────────────────────────────────────────┐
-│           WASM-specialized codegen           │
-│   ┌────────────────┬────────────────────┐   │
-│   │ Cranelift WASM │ LLVM WASM           │   │
-│   │ (dev builds)   │ (release builds)    │   │
-│   └────────────────┴────────────────────┘   │
-└─────────────────────────────────────────────┘
-                    ▼
-┌─────────────────────────────────────────────┐
-│         crates/wasm (zero-cost APIs)         │
-│   externref, threads, components, memory    │
-└─────────────────────────────────────────────┘
+* **WASM-native type abstractions**  
+* **Rapid development builds using Cranelift**
+* **Highly optimized release builds using LLVM**
+* **Stable semantic boundary (WasmIR)**
+* **Compiler-verified safety and ABI invariants**
+* **Component Model readiness and GC compatibility**
+
 ```
----
-
-## 🌍 Design Philosophy
-
-1. **WASM-native semantics**: Model WebAssembly concepts (memory, resources, components) directly.
-2. **Safety without bloat**: Retain Rust’s memory safety while avoiding unnecessary runtime overhead.
-3. **Incremental adoption**: Interoperate with existing Rust, `wasm-bindgen`, and WASI code.
-4. **Global and federated**: Avoid centralized registries and vendor lock-in.
-5. **Evidence-driven**: Features are justified through benchmarks, size, or correctness.
+WasmRust = rustc + WASM specialization
+```
 
 ---
 
+## Native Rust vs GC-Ready Rust (Mental Model)
+
+| Domain         | Execution Model                                  |
+| -------------- | ------------------------------------------------ |
+| Native systems | **Rust owns memory explicitly**                  |
+| WASM today     | **Linear memory + reference tables**             |
+| WASM future    | **GC-managed references + component model**      |
+
+WasmRust enables writing **a single Rust codebase** that:
+* Executes as **native systems Rust**
+* Compiles to **WASM with explicit semantic modeling**
+* Naturally evolves toward **WasmGC compatibility**
+
+---
+
+## Repository Structure
+
+```
+wasmrust/
+├── compiler/                        # rustc extensions & backends
+│   ├── codegen-cranelift/           # Fast WASM development builds
+│   ├── codegen-llvm/                # Optimized WASM release builds
+│   ├── verifier/                    # Semantic invariant validation
+│   └── lints/                       # wasm-specific lint infrastructure
+│
+├── crates/
+│   ├── wasm/                        # WASM-native zero-cost abstractions
+│   └── wasm-macros/                 # Component Model & WIT macros
+│
+├── tooling/
+│   └── cargo-wasm/                  # WASM-aware Cargo integration
+│
+├── docs/
+│   ├── SAFETY.md                    # Authoritative unsafe invariants
+│   ├── compiler-contract.md         # Compiler ↔ crate guarantees
+│   ├── RFCs/
+│   └── architecture/
+│
+└── README.md
+```
+
+---
+
+## crates/wasm — The Semantic Foundation
+
+The `wasm` crate defines **WASM-native Rust abstractions**:
+
+* `ExternRef<T>` — host-managed reference types
+* `FuncRef` — callable function references
+* `SharedSlice<T: Pod>` — safe shared linear memory access
+* Linear types (`#[wasm::linear]`)
+* Capability-aware threading and memory APIs
+
+**Key design properties:**
+* `no_std` compatible by default
+* Zero runtime overhead
+* Stable Rust compatible
+* Compiler-recognizable semantic patterns
+
+> The compiler leverages documented invariants to enable aggressive optimization of code using these types.
+
+---
+
+## Safety & Compiler Contracts
+
+WasmRust formalizes unsafe behavior rather than obscuring it.
+
+### SAFETY.md Documentation
+* Defines **precise unsafe invariants per type**
+* Serves as authoritative reference for correctness
+* Shared understanding between library users and compiler developers
+
+### Compiler Contract System
+* The compiler assumes documented type invariants
+* Violations are detected through multiple mechanisms:
+  * MIR-level verification passes
+  * `wasm-recognition` lint infrastructure
+  * Property-based test validation
+
+This enables **powerful optimizations while maintaining soundness guarantees**.
+
+---
+
+## Compilation Model
+
+```mermaid
+graph LR
+    A[Rust Source] --> B[MIR Intermediate Representation]
+    B --> C[WasmIR<br/>Stable Semantic Boundary]
+    C --> D{Build Profile Selection}
+    D -->|Development| E[Cranelift Backend]
+    D -->|Release| F[LLVM Backend]
+    E --> G[Fast Development WASM]
+    F --> H[Optimized Production WASM]
+```
+
+**WasmIR encodes critical semantic information:**
+* Reference type semantics
+* Memory region constraints
+* Component ABI requirements
+* Ownership and linearity properties
+* Capability-based security constraints
+
+---
+
+## Why Cranelift + LLVM Dual Backend?
+
+* **Cranelift** → rapid iteration, CI testing, development workflows
+* **LLVM** → maximum runtime performance and binary size optimization
+
+Both backends compile the **identical Rust source code** and respect the same semantic contracts.
+
+---
+
+## What Makes WasmRust Different?
+
+| Characteristic               | WasmRust |
+| ---------------------------- | -------- |
+| Requires new language        | ❌        |
+| Rust language fork           | ❌        |
+| JavaScript-centric design    | ❌        |
+| WASM-native semantic modeling| ✅        |
+| GC-ready architecture        | ✅        |
+| Zero-cost abstractions       | ✅        |
+| Compiler-verified invariants | ✅        |
+
+---
+
+## Target Audience
+
+* Systems engineers targeting WebAssembly deployment
+* Rust teams encountering WASM performance or iteration limitations
+* Component Model and multi-language WASM system developers
+* Future-proof WASM application developers (GC, components, streaming)
+
+---
+
+## Getting Started
+
+* 📦 Use `crates/wasm` on stable Rust today
+* 📖 Study `docs/SAFETY.md` and `compiler-contract.md` documentation
+* 🧪 Experiment with Cranelift development builds (requires nightly)
+* 🧠 Contribute to semantic invariant definitions before backend development
+
+---
+
+## Core Principle
+
+> **WasmRust does not ask Rust to become a garbage-collected language.**
+> **It enables Rust to correctly target a garbage-collected machine.**
+
+This distinction represents the fundamental project philosophy.
+
+---
 ## 🏗 Architecture Overview
 
 WasmRust is structured as a **five-layer stack**:
