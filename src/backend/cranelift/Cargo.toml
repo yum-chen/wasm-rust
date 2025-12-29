@@ -27,12 +27,12 @@ wasmparser = "0.100.0"
 wasm-encoder = "0.30.0"
 
 # Rust compiler dependencies
-rustc-middle = { git = "https://github.com/rust-lang/rust.git", branch = "master" }
-rustc-target = { git = "https://github.com/rust-lang/rust.git", branch = "master" }
-rustc-data-structures = { git = "https://github.com/rust-lang/rust.git", branch = "master" }
-rustc-ty = { git = "https://github.com/rust-lang/rust.git", branch = "master" }
-rustc-mir = { git = "https://github.com/rust-lang/rust.git", branch = "master" }
-rustc-serialize = { git = "https://github.com/rust-lang/rust.git", branch = "master" }
+rustc-middle = { git = "https://github.com/rust-lang/rust.git", branch = "stable" }
+rustc-target = { git = "https://github.com/rust-lang/rust.git", branch = "stable" }
+rustc-data-structures = { git = "https://github.com/rust-lang/rust.git", branch = "stable" }
+rustc-ty = { git = "https://github.com/rust-lang/rust.git", branch = "stable" }
+rustc-mir = { git = "https://github.com/rust-lang/rust.git", branch = "stable" }
+rustc-serialize = { git = "https://github.com/rust-lang/rust.git", branch = "stable" }
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 # Browser-specific optimizations
