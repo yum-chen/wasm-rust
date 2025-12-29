@@ -1,32 +1,32 @@
-# WasmRust
+# WasmRust — Rust-to-WebAssembly Compiler
 
-**WasmRust** is a research-driven, production-oriented effort to make **Rust a WASM-native language**, not merely a language that *targets* WebAssembly.
+**WasmRust** is a research-driven, production-oriented Rust-to-WebAssembly compilation system. It aims to make **Rust truly WASM-native**, not merely a language that targets WebAssembly.
 
-Rather than forking Rust or reinventing the ecosystem, WasmRust explores **minimal, evidence-based extensions** to Rust’s language, compiler, and tooling that close the real gaps in today’s Rust → WASM pipeline: binary size, compile time, component interoperability, and host friction.
+WasmRust extends Rust through **minimal, evidence-based compiler and library enhancements**, closing gaps in binary size, compilation speed, component interoperability, and host friction — all while preserving Rust’s safety guarantees.
 
-> **Position**: Rust is a strong foundation for WASM — but not inherently optimal. WasmRust exists to close that gap.
+> **Core Principle:**
+> WasmRust = rustc + WASM specialization, not a new language.
 
 ---
 
 ## ✨ Motivation
 
-Rust dominates the WASM ecosystem today (`wasmtime`, `wasmer`, `wasm-tools`, `wit-bindgen`), yet developers consistently encounter:
+Despite Rust’s dominance in the WASM ecosystem (`wasmtime`, `wasmer`, `wit-bindgen`), developers face:
 
-*   ❌ **Large binaries**: A "hello world" can be 35 KB, compared to 2 KB in C, due to monomorphization.
-*   ❌ **Slow compile times**: The LLVM backend and borrow-checking lead to slow iteration cycles.
-*   ❌ **JS interop friction**: The `wasm-bindgen` glue layer adds overhead and cognitive load.
-*   ❌ **A steep learning curve**: Ownership and lifetimes can be a barrier for non-systems developers.
-*   ❌ **Mismatches with the WASM Component Model**: Rust's semantics don't always map cleanly to WASM's emerging standards.
+* **Large binaries** – even simple programs can be 35 KB; alternative WASM-first languages can be smaller.
+* **Slow compilation** – LLVM backend + borrow checking slows iteration.
+* **JS interop friction** – glue layers add overhead and complexity.
+* **Steep learning curve** – ownership and lifetimes can be barriers.
+* **WASM Component Model misalignment** – Rust semantics do not always map cleanly to WASM interfaces.
 
-**WasmRust asks a different question**:
+WasmRust asks:
 
 > *What would Rust look like if WASM were a first-class execution model?*
 
 ---
-
 ## What Is WasmRust?
 
-WasmRust is a **specialized Rust toolchain** that keeps the Rust frontend unchanged (parser, HIR, MIR, borrow checker) and swaps or augments code generation for WASM. It provides library-level primitives that map directly to WASM concepts.
+WasmRust is a **specialized Rust toolchain** that keeps the Rust frontend unchanged (parser, HIR, MIR, borrow checker) and augments code generation for WASM, providing library-level primitives that map directly to WASM concepts.
 
 ```text
 ┌─────────────────────────────────────────────┐
@@ -48,106 +48,86 @@ WasmRust is a **specialized Rust toolchain** that keeps the Rust frontend unchan
 │   externref, threads, components, memory    │
 └─────────────────────────────────────────────┘
 ```
-
 ---
 
 ## 🌍 Design Philosophy
 
-1.  **WASM-Native Semantics**: Model WASM concepts (resources, memories, components) *directly*, not via glue code.
-2.  **Safety Without Runtime Bloat**: Preserve Rust’s memory safety while eliminating unnecessary abstraction overhead.
-3.  **Incremental Adoption**: Interoperate with existing Rust, `wasm-bindgen`, and WASI code.
-4.  **Global & Federated**: Avoid centralized registries and vendor lock-in; design for global accessibility.
-5.  **Evidence Over Dogma**: Every feature must justify itself via benchmarks, size, or correctness.
+1. **WASM-native semantics**: Model WebAssembly concepts (memory, resources, components) directly.
+2. **Safety without bloat**: Retain Rust’s memory safety while avoiding unnecessary runtime overhead.
+3. **Incremental adoption**: Interoperate with existing Rust, `wasm-bindgen`, and WASI code.
+4. **Global and federated**: Avoid centralized registries and vendor lock-in.
+5. **Evidence-driven**: Features are justified through benchmarks, size, or correctness.
 
 ---
 
-## 🧱 Architecture
+## 🏗 Architecture Overview
 
-WasmRust is structured as a **five-layer stack**, each independently useful and incrementally adoptable.
+WasmRust is structured as a **five-layer stack**:
 
-```mermaid
-graph TB
-    subgraph "Layer 5: Tooling & Distribution"
-        A[cargo-wasm CLI [planned]]
-        B[Registry Federation]
-        C[Debug Tools]
-        D[Profiler]
-    end
-
-    subgraph "Layer 4: Compiler Backend"
-        E[Cranelift Backend]
-        F[LLVM Backend]
-        G[Profile-Guided Optimization]
-        H[Verifier Pass [planned]]
-        I[wasm-recognition Lints [planned]]
-    end
-
-    subgraph "Layer 3: Runtime Services"
-        J[Memory Management]
-        K[Threading Runtime]
-        L[Component Linking]
-    end
-
-    subgraph "Layer 2: Language Extensions"
-        M[Component Model Macros]
-        N[WIT Integration]
-        O[Capability Annotations]
-    end
-
-    subgraph "Layer 1: Core Language"
-        P[WASM Native Types]
-        Q[Linear Types]
-        R[Safe Abstractions]
-    end
-
-    A --> E
-    A --> F
-    E --> J
-    F --> J
-    H --> E
-    H --> F
-    I --> H
-    M --> P
-    N --> Q
-    J --> R
 ```
-
+┌─────────────────────────────┐
+│ Layer 5 — Tooling & Ecosystem│
+│ Registries, debugging, profiler│
+├─────────────────────────────┤
+│ Layer 4 — Compiler           │
+│ WasmIR, Cranelift, LLVM, PGO│
+├─────────────────────────────┤
+│ Layer 3 — Runtime Semantics  │
+│ Multi-memory, regions, threads│
+├─────────────────────────────┤
+│ Layer 2 — Component Model    │
+│ WIT-native imports/exports   │
+├─────────────────────────────┤
+│ Layer 1 — Core Language      │
+│ Linear types, effects, concurrency│
+└─────────────────────────────┘
+```
 ---
+### The 5 Layers in Detail
 
-## The 5 Layers in Detail
+#### Layer 1 — Core Language Extensions & `crates/wasm`
 
-### 🧠 Layer 1: Core Language Extensions & `crates/wasm`
+The foundation of WasmRust is the `crates/wasm` library. It is `no_std`, dependency-free, runtime-free, and compiler-agnostic. Most WASM semantics belong at the library boundary, providing the compiler with semantic hooks for optimization and allowing stable Rust users to adopt WASM-first APIs today.
 
-The `wasm` crate is the foundation: `no_std`, dependency-free, runtime-free, and compiler-agnostic, providing zero-cost abstractions over WASM primitives.
+* **Linear Types**: Enforce use-once semantics for WASM resources to prevent leaks.
+  ```rust
+  #[wasm::linear]
+  struct CanvasContext(wasm::Handle);
 
-*   **Linear Types for WASM Resources**: Prevents resource leaks with use-once semantics.
-    ```rust
-    #[wasm::linear]
-    struct CanvasContext(wasm::Handle);
+  impl CanvasContext {
+      fn draw(&mut self) { /* ... */ }
+      // This consuming method moves ownership, preventing further use.
+      fn into_bitmap(self) -> ImageData { /* ... */ }
+  }
+  ```
+* **Structured Concurrency**: Scoped threads with automatic joining and lifetime-bound safety.
+  ```rust
+  use wasm::thread::scope;
 
-    impl CanvasContext {
-        fn draw(&mut self) { /* ... */ }
-        fn into_bitmap(self) -> ImageData { /* ... */ } // Consumes self
-    }
-    ```
-*   **Structured Concurrency**: Scoped concurrency with automatic joining.
-    ```rust
-    use wasm::thread::scope;
-    scope(|s| {
-        for chunk in data.chunks(1000) {
-            s.spawn(|| process(chunk)); // Lifetime tied to scope
-        }
-    });
-    ```
-*   **Effect System for Side Effects**: Tracks I/O and JS calls at the type level for optimization.
-    ```rust
-    #[wasm::effect(js_call)]
-    fn fetch_data(url: &str) -> Result<Vec<u8>, Error> { /* ... */ }
-    ```
+  #[wasm::export]
+  fn parallel_transform(data: SharedSlice<f32>) -> Result<(), Error> {
+      scope(|s| {
+          for chunk in data.chunks(1000) {
+              s.spawn(|| process(chunk)); // Lifetime tied to scope
+          }
+          // All threads are automatically joined here
+      })?;
+      Ok(())
+  }
+  ```
+* **Effect System**: Track side effects like JS calls or I/O at the type level to enable optimizations like dead-effect elimination.
+  ```rust
+  #[wasm::effect(js_call, atomic_read)]
+  fn fetch_and_cache(url: &str) -> Result<Vec<u8>, Error> {
+      let data = js::fetch(url)?;
+      CACHE.store(url, data);
+      Ok(data)
+  }
+  ```
 
-### 🔌 Layer 2: Component Model Deep Dive
+#### Layer 2 — Component Model
 
-Treats WIT as a first-class interface language, enabling bidirectional code generation without glue code.
+Treats WIT as a first-class interface, enabling type-safe, bidirectional Rust ↔ WASM code generation without glue code.
 
 ```rust
 #[wasm::wit]
@@ -159,50 +139,49 @@ interface crypto {
 }
 ```
 
-### ⚙️ Layer 3: Runtime Semantics
+#### Layer 3 — Runtime Semantics
 
-*   **Multi-Region Memory**: First-class support for data residency and isolation (e.g., for GDPR).
-    ```rust
-    #[wasm::memory(region = "eu-west-1")]
-    static EU_DATA: wasm::Memory<8_000_000>;
-    ```
-*   **Streaming Compilation Hints**: Optimize startup latency in browsers.
-    ```rust
-    #[wasm::compile_hints(tier = "baseline", critical = ["render_frame"])]
-    mod ui;
-    ```
+*   **Multi-region memory**: First-class support for data residency and isolation.
+*   **Streaming compilation hints**: Optimize binary layout for faster Time-to-Interactive in browsers.
 
-### 🛠️ Layer 4: Compiler Strategy
+#### Layer 4 — Compiler Strategy
 
-*   **Cranelift-First Backend**: Fast dev builds (~2s) via Cranelift, optimized release builds via LLVM (~8s, 30% smaller).
-*   **Compilation Pipeline**:
-    ```mermaid
-    graph LR
-        A[Rust Source] --> B[HIR/MIR]
-        B --> C[WasmIR - Stable Boundary]
-        C --> D{Build Profile}
-        D -->|Development| E[Cranelift Backend]
-        D -->|Release| F[LLVM Backend]
-        E --> G[Fast WASM + Debug Info]
-        F --> H[Optimized WASM]
-        H --> I[wasm-opt]
-        I --> J[Component Model Wrapper]
-    ```
+*   **Cranelift-first dev builds** for fast iteration (~2s for 10k LOC).
+*   **LLVM release builds** for aggressive optimizations, `wasm-opt`, and Profile-Guided Optimization.
+*   **WasmIR**: A stable intermediate representation that captures linearity, reference types, and ownership invariants.
 
-### 🌐 Layer 5: Tooling & Ecosystem
+#### Layer 5 — Tooling & Ecosystem
 
-*   **Federated Registries**: Avoids centralized points of failure.
-    ```bash
-    cargo wasm registry add apac https://wasm.asia/registry
-    cargo wasm add crypto --registry=apac,bytecode-alliance
-    ```
-*   **WASM-Aware Debugging**: Native tooling for memory inspection.
-    ```bash
-    wasm-gdb ./app.wasm --port 9229
-    (gdb) wasm mem visualize
-    ```
+*   **Federated registries** to avoid centralized lock-in and geopolitical restrictions.
+*   **WASM-aware debugging tools** for memory visualization and inspection.
+
 ---
+## Core Features
 
+| Feature           | Description                                              |
+| ----------------- | -------------------------------------------------------- |
+| WASM-native types | `ExternRef`, `FuncRef`, `SharedSlice`, `Pod`             |
+| Linear types      | Enforce move-only semantics for WASM resources           |
+| Component Model   | Compiler-verified ABI, WIT bindings                      |
+| JS Interop        | Zero-copy, predictable boundary cost                     |
+| Threading         | Scoped concurrency, fallback in unsupported environments |
+
+---
+## Compilation Pipeline
+
+```mermaid
+graph LR
+    A[Rust Source] --> B[HIR/MIR]
+    B --> C[WasmIR]
+    C --> D{Build Profile}
+    D -->|Dev| E[Cranelift]
+    D -->|Release| F[LLVM]
+    E --> G[Fast WASM]
+    F --> H[Optimized WASM]
+    H --> I[wasm-opt]
+    I --> J[Component Wrapper]
+```
+---
 ## Repository Structure
 
 ```
@@ -226,19 +205,16 @@ wasmrust/
 │
 └── ReadMe.md
 ```
-
 ---
-
 ## Incremental Adoption
 
 #### What Works Without WasmRust?
 Everything in `crates/wasm`: it compiles on **stable Rust**, produces valid WASM, and has no dependency on a custom compiler. WasmRust **enhances**, but does not gate, functionality.
 
 #### What Requires the WasmRust Compiler?
-Native Component Model emission, Cranelift-accelerated builds, and advanced optimizations like PGO and thin monomorphization.
+Native Component Model emission, Cranelift-accelerated builds, and advanced optimizations like PGO and WASM-aware thin monomorphization. These cannot be achieved from a library alone.
 
 ---
-
 ## Contracts & Governance
 
 *   **Language Surface Contract**: Core (80%): Standard Rust; Extensions (15%): `wasm` crate; Plugins (4%): `-Z` flags; Hard Fork (<1%): Minimal changes if required.
@@ -246,15 +222,12 @@ Native Component Model emission, Cranelift-accelerated builds, and advanced opti
 *   **Governance & Direction**: Upstream-friendly, library-first stabilization, and RFC-driven evolution.
 
 ---
-
 ## Notes on SAFETY.md
 
 * Contains **formal unsafe invariants** per type.
 * Used by the compiler **verifier pass** and **lint group**.
 * Serves as authoritative documentation for both crate users and compiler developers.
-
 ---
-
 ## Host Profile Support
 
 | Host Profile | Threading                     | JS Interop      | Component Model | Memory Regions |
@@ -263,58 +236,50 @@ Native Component Model emission, Cranelift-accelerated builds, and advanced opti
 | Node.js      | Worker threads                | Native bindings | Polyfill        | No             |
 | Wasmtime     | wasi-threads                  | Host functions  | Full            | Configurable   |
 | Embedded     | No                            | No              | Partial         | No             |
-
 ---
-
 ## Testing and Verification
 
-*   Property-Based Testing: binary size, ownership, threading safety.
+*   Property-Based Testing: binary size, monomorphization, ownership enforcement, threading safety.
 *   Cross-Language ABI Testing: Zig, C, and other WASM components.
 *   Reproducible Builds and Performance Benchmarks.
-
 ---
+## Comparative Snapshot
 
-## Non-Goals
-
-WasmRust is **not** a Rust fork, a new language, a replacement for `wasm-bindgen` (initially), or a JS framework.
-
+| Metric          | WasmRust    | Rust+bindgen | Zig   | AssemblyScript |
+| --------------- | ----------- | ------------ | ----- | -------------- |
+| Binary size     | ~2 KB       | ~35 KB       | ~1 KB | ~8 KB          |
+| Compile time    | ~3s         | ~12s         | ~2s   | ~4s            |
+| Memory safety   | ✅           | ✅            | ⚠️    | ⚠️             |
+| Component Model | ✅           | ❌            | ⚠️    | ❌              |
+| Thread Safety   | ✅           | ⚠️ Unsafe    | ⚠️    | ⚠️             |
 ---
-
-## 📊 Comparative Snapshot
-
-| Metric          | WasmRust | Rust+bindgen | Zig   | AssemblyScript |
-| --------------- | -------- | ------------ | ----- | -------------- |
-| Binary size     | **~2 KB**    | ~35 KB       | **~1 KB** | ~8 KB          |
-| Compile time    | **~3s**      | ~12s         | **~2s**   | ~4s            |
-| Memory safety   | ✅        | ✅            | ⚠️    | ⚠️             |
-| Component Model | ✅ Native | ❌            | ⚠️    | ❌              |
-
----
-
 ## 🚀 Roadmap
 
-*   **Phase 1 (3 mo)**: `wasm` crate PoC, Cranelift backend, Benchmarks.
-*   **Phase 2 (6 mo)**: Bidirectional WIT codegen, `cargo-wasm`, Debugging tools.
-*   **Phase 3 (12 mo)**: Rust RFCs, Bytecode Alliance collaboration, Wasm CG presentation.
+**Phase 1 — Proof of Concept (3 months)**
+* `wasm` crate: core WASM abstractions
+* Cranelift backend for dev builds
+* Benchmark comparisons
+
+**Phase 2 — Component Model (6 months)**
+* WIT ↔ Rust bidirectional codegen
+* `cargo-wasm` with federated registry
+* DevTools memory visualization
+
+**Phase 3 — Standardization (12 months)**
+* RFCs for Layer 1 features
+* Collaboration with Bytecode Alliance
+* W3C WebAssembly CG presentation
+---
+## Non-Goals
+
+* A Rust fork or new language
+* Replacing `wasm-bindgen` initially
+* A JavaScript framework or runtime
 
 ---
+## Where to Start
 
-## 🤝 Contributing
-
-WasmRust is research-first and community-driven. We welcome benchmarks, compiler experiments, design critiques, and documentation.
-
-#### Where to Start
 *   📦 Use `crates/wasm` for low-level WASM code today.
 *   📖 Read `docs/RFCs/0001-wasmrust-architecture.md`.
 *   🧪 Experiment with Cranelift WASM builds (nightly).
 *   🛠️ Contribute to core abstractions before compiler work.
-
----
-
-## 🧭 Final Word
-
-WasmRust is not trying to “replace Rust”. It is asking a harder question:
-
-> *What does it mean for a language to truly belong to WebAssembly?*
-
-WasmRust exists to explore that evolution — openly, globally, and rigorously.
