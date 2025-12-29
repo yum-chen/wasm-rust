@@ -169,6 +169,18 @@ This document specifies the requirements for WasmRust, an optimized Rust-to-WebA
 4. WHEN linear types are used, THE WasmRust_Compiler SHALL provide clear migration path if upstream Rust adopts different syntax
 5. THE WasmRust_Compiler SHALL maintain compatibility with the stable Rust ecosystem including crates.io dependencies
 
+### Requirement 13: Compiler-Crate Contract
+
+**User Story:** As a compiler engineer, I want explicit contracts between the compiler and wasm crate, so that I can implement sound optimizations without ecosystem lock-in.
+
+#### Acceptance Criteria
+
+1. THE WasmRust_Compiler SHALL only assume documented unsafe invariants from the wasm crate as specified in the formal Compiler ↔ Crate Contract
+2. WHEN optimizing wasm crate usage, THE WasmRust_Compiler SHALL only pattern-match explicitly whitelisted MIR shapes
+3. THE WasmRust_Compiler SHALL provide mechanical verification that all optimizations reference documented invariants
+4. WHEN the wasm crate is replaced or removed, THE WasmRust_Compiler SHALL produce semantically equivalent output to stable rustc
+5. THE WasmRust_Compiler SHALL implement the wasm-recognition lint group to prevent unsound assumptions
+
 ## Non-Goals
 
 The following are explicitly outside the scope of WasmRust:
@@ -332,3 +344,103 @@ WasmRust explicitly supports the following execution environments:
 
 3. **Timing Attacks on Cryptographic Code**
    - **Rationale**: Use constant-time crypto libraries (not compiler's job)
+## Appendix D: Compiler-Crate Contract Specification
+
+### Purpose
+
+This contract defines the semantic boundary between the WasmRust compiler extension and the `wasm` crate to:
+- Prevent unsound compiler assumptions
+- Enable aggressive WASM-specific optimization safely
+- Preserve library-first evolution
+- Allow `wasm` crate to work on stable rustc
+- Make upstreaming to rustc possible
+
+### Fundamental Principles
+
+1. **Zero-Cost Invariant**: All public types in `wasm` crate are `#[repr(transparent)]` or `#[repr(C)]`, layout-compatible with WASM counterparts, and free of hidden allocations
+2. **No Semantic Magic**: The `wasm` crate provides no behavior that requires compiler support
+3. **Escape Hatch Rule**: Everything the compiler assumes must be reproducible by a pure library implementation
+
+### Type-Level Contracts
+
+#### ExternRef<T>
+```rust
+#[repr(transparent)]
+pub struct ExternRef<T> {
+    handle: u32,
+    _marker: PhantomData<T>,
+}
+```
+
+**Compiler MAY assume**:
+- Maps 1:1 to WASM externref
+- Is opaque and non-dereferenceable
+- Does not alias Rust memory
+- Has no Rust-visible interior mutability
+
+**Compiler MUST NOT assume**:
+- Any lifetime or ownership beyond Rust typing
+- GC behavior or host identity stability
+- That equal handles represent equal objects
+
+#### SharedSlice<'a, T: Pod>
+```rust
+pub struct SharedSlice<'a, T: Pod> {
+    ptr: NonNull<T>,
+    len: usize,
+    _lifetime: PhantomData<&'a [T]>,
+}
+```
+
+**Compiler MAY assume**:
+- `T: Pod` implies no pointers, no drop glue, bitwise movable
+- Backed by linear memory, safe for concurrent reads
+- Writes governed by Rust aliasing rules
+
+**Compiler MUST NOT assume**:
+- Atomicity unless explicitly requested
+- That threads exist (may lower to single-threaded)
+- Memory is shared across components unless proven
+
+#### Pod Trait
+```rust
+unsafe trait Pod: Copy + 'static {}
+```
+
+**Compiler MAY assume**:
+- Trivially copyable with no invalid bit patterns
+- Safe for zero-copy serialization
+
+**Compiler MUST NOT assume**:
+- Endianness normalization or stable ABI across targets
+- That all `Copy` types are `Pod`
+
+### MIR Pattern Matching Rules
+
+The compiler is only allowed to recognize and optimize specific MIR patterns:
+
+1. **ExternRef Pass-Through Pattern**: `_1 = ExternRef::new(_2); _3 = call foo(_1)`
+2. **SharedSlice Load Pattern**: `_elt = (*(_slice.ptr + idx))` where `T: Pod`
+3. **Pod Copy Pattern**: `_2 = _1` where `_1: T, T: Pod`
+4. **Component Boundary Call Pattern**: `_0 = call component::import_X(_1, _2)`
+
+### Optimization Safety Rules
+
+**Allowed Optimizations**:
+- Inline through wasm wrappers
+- Merge monomorphizations when proven safe
+- Remove unused exports
+- Replace library calls with intrinsics
+
+**Forbidden Optimizations**:
+- Change observable behavior
+- Introduce UB if wasm crate is replaced
+- Assume unsafe blocks are safe
+- Break Rust aliasing or lifetime rules
+
+### Verification Requirements
+
+All optimizations relying on this contract MUST:
+- Reference the specific invariant section relied upon
+- Be testable by removing the optimization and compiling with stable rustc
+- Observe identical semantics in both cases
