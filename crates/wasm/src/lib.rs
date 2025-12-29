@@ -281,11 +281,10 @@ impl<T> ExternRef<T> {
         // Validate property exists and has correct type
         T::validate_property(property)
             .map_err(|e| WasmError::HostError(e))?;
-
         // SAFETY: Property mutation is guarded by null check and type validation
-        // The host guarantees atomic property mutation for the object type
+        // The host guarantees atomic property mutation for object type
         unsafe {
-            host::set_property_checked::<T>(self.handle, property, value)
+            host::set_property_checked::<V>(self.handle, property, value)
                 .map_err(|e| WasmError::HostError(e))
         }
     }

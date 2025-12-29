@@ -6,6 +6,7 @@
 
 use crate::Pod;
 use crate::host::{get_host_capabilities, HostCapabilities};
+use crate::alloc::string::ToString;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicUsize, AtomicPtr, Ordering};
 use core::marker::PhantomData;
@@ -123,7 +124,7 @@ impl<T: Pod> SharedMemory<T> {
             return Ok(());
         }
 
-        self.reallocate(new_capacity)
+        unsafe { self.reallocate(new_capacity) }
     }
 
     /// Shrinks the capacity to match the current length
@@ -132,7 +133,7 @@ impl<T: Pod> SharedMemory<T> {
             return Ok(());
         }
 
-        self.reallocate(self.len)
+        unsafe { self.reallocate(self.len) }
     }
 
     unsafe fn reallocate(&mut self, new_capacity: usize) -> Result<(), MemoryError> {

@@ -5,6 +5,7 @@
 //! and capability detection for different host environments.
 
 use crate::host::{get_host_capabilities, HostCapabilities};
+use crate::alloc::string::ToString;
 use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use core::ptr::NonNull;
 use core::marker::PhantomData;

@@ -5,6 +5,8 @@
 //! capability detection and graceful fallbacks.
 
 use core::ffi::c_void;
+use core::any::Any;
+use crate::alloc::string::ToString;
 use crate::InteropError;
 
 /// Supported host environments
@@ -406,7 +408,7 @@ pub enum JsValue {
 /// Converts JavaScript value to i32
 pub fn convert_js_to_i32(value: JsValue) -> Result<i32, InteropError> {
     match value {
-        JsValue::Number(n) if n.fract() == 0.0 && n >= i32::MIN as f64 && n <= i32::MAX as f64 => {
+        JsValue::Number(n) if n.trunc() == n && n >= i32::MIN as f64 && n <= i32::MAX as f64 => {
             Ok(n as i32)
         }
         _ => Err(InteropError::TypeMismatch("Expected number".to_string())),

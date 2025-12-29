@@ -17,9 +17,11 @@ use rustc_middle::ty::TyS;
 use rustc_middle::mir::{BasicBlock, Location};
 use rustc_target::spec::Target;
 pub mod mir_lowering;
+pub mod wasm_codegen;
 use std::collections::HashMap;
 
-use crate::wasmir::{WasmIR, WasmIRInstruction, WasmIRType};
+use crate::wasmir::{WasmIR, Instruction, Type, Signature, Operand, BinaryOp};
+use crate::backend::{CompilationResult, BackendError};
 
 /// Cranelift codegen backend for WasmRust
 pub struct WasmRustCraneliftBackend {
@@ -127,6 +129,133 @@ impl WasmRustCraneliftBackend {
         }
 
         Ok(results)
+    }
+
+    /// Compiles WasmIR to WebAssembly using direct code generation
+    pub fn compile_to_wasm(&mut self, wasmir: &mut WasmIR) -> Result<Vec<u8>, CodegenError> {
+        let mut wasm_codegen = super::wasm_codegen::WasmCodegen::new();
+        let compilation_result = wasm_codegen.compile(wasmir)
+            .map_err(|e| CodegenError::CompilationFailed(format!("WASM codegen failed: {}", e)))?;
+        
+        Ok(compilation_result.code)
+    }
+
+    /// Compiles WasmIR with both Cranelift and WASM optimization
+    pub fn compile_hybrid(&mut self, wasmir: &mut WasmIR) -> Result<Vec<u8>, CodegenError> {
+        // Apply WasmRust-specific optimizations first
+        self.apply_wasmir_optimizations(wasmir)?;
+        
+        // Use WASM codegen for final output
+        let wasm_bytes = self.compile_to_wasm(wasmir)?;
+        
+        Ok(wasm_bytes)
+    }
+
+    /// Applies WasmIR-specific optimizations
+    fn apply_wasmir_optimizations(&mut self, wasmir: &mut WasmIR) -> Result<(), CodegenError> {
+        if self.optimization_flags.thin_monomorphization {
+            self.apply_thin_monomorphization_to_wasmir(wasmir)?;
+        }
+
+        if self.optimization_flags.wasm_optimizations {
+            self.apply_wasm_specific_optimizations(wasmir)?;
+        }
+
+        Ok(())
+    }
+
+    /// Applies thin monomorphization to WasmIR
+    fn apply_thin_monomorphization_to_wasmir(&mut self, wasmir: &mut WasmIR) -> Result<(), CodegenError> {
+        use crate::backend::cranelift::thin_monomorphization::ThinMonomorphizer;
+        
+        let mut monomorphizer = ThinMonomorphizer::new();
+        let optimized_functions = monomorphizer.analyze_and_optimize(&[wasmir.clone()])
+            .map_err(|e| CodegenError::Optimization(format!("Thin monomorphization failed: {}", e)))?;
+        
+        if !optimized_functions.is_empty() {
+            *wasmir = optimized_functions[0].clone();
+        }
+        
+        Ok(())
+    }
+
+    /// Applies WASM-specific optimizations to WasmIR
+    fn apply_wasm_specific_optimizations(&mut self, wasmir: &mut WasmIR) -> Result<(), CodegenError> {
+        // Apply constant folding
+        self.fold_constants_in_wasmir(wasmir)?;
+        
+        // Apply instruction selection
+        self.optimize_instructions_in_wasmir(wasmir)?;
+        
+        Ok(())
+    }
+
+    /// Folds constants in WasmIR
+    fn fold_constants_in_wasmir(&self, wasmir: &mut WasmIR) -> Result<(), CodegenError> {
+        for block in &mut wasmir.basic_blocks {
+            for instruction in &mut block.instructions {
+                if let Instruction::BinaryOp { op, left, right } = instruction {
+                    if let (Operand::Constant(left_const), Operand::Constant(right_const)) = (left, right) {
+                        if let Some(result) = self.evaluate_binary_constant(*op, left_const, right_const) {
+                            *instruction = Instruction::LocalSet {
+                                index: 0, // Placeholder
+                                value: Operand::Constant(result),
+                            };
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Evaluates binary constant operations
+    fn evaluate_binary_constant(&self, op: BinaryOp, left: &Constant, right: &Constant) -> Option<Constant> {
+        use crate::wasmir::Constant;
+        
+        match (left, right) {
+            (Constant::I32(l), Constant::I32(r)) => {
+                let result = match op {
+                    BinaryOp::Add => l + r,
+                    BinaryOp::Sub => l - r,
+                    BinaryOp::Mul => l * r,
+                    BinaryOp::Div => l.checked_div(r)?,
+                    BinaryOp::Mod => l.checked_rem(r)?,
+                    BinaryOp::And => l & r,
+                    BinaryOp::Or => l | r,
+                    BinaryOp::Xor => l ^ r,
+                    BinaryOp::Eq => (l == r) as i32,
+                    BinaryOp::Ne => (l != r) as i32,
+                    BinaryOp::Lt => (l < r) as i32,
+                    BinaryOp::Le => (l <= r) as i32,
+                    BinaryOp::Gt => (l > r) as i32,
+                    BinaryOp::Ge => (l >= r) as i32,
+                };
+                Some(Constant::I32(result))
+            }
+            _ => None,
+        }
+    }
+
+    /// Optimizes instructions in WasmIR
+    fn optimize_instructions_in_wasmir(&self, wasmir: &mut WasmIR) -> Result<(), CodegenError> {
+        for block in &mut wasmir.basic_blocks {
+            for instruction in &mut block.instructions {
+                if let Instruction::BinaryOp { op, left: _, right } = instruction {
+                    // Optimize multiplication by power of 2 to shifts
+                    if *op == BinaryOp::Mul {
+                        if let Operand::Constant(Constant::I32(const_val)) = right {
+                            if const_val.is_power_of_two() && *const_val > 0 {
+                                let shift_amount = const_val.trailing_zeros();
+                                *op = BinaryOp::Shl;
+                                *right = Operand::Constant(Constant::I32(shift_amount as i32));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Gets compilation statistics

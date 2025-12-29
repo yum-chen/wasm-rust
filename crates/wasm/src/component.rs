@@ -6,6 +6,7 @@
 
 use crate::host::{get_host_capabilities, HostCapabilities};
 use crate::wasmir::{WasmIR, Signature, Type, Instruction, Terminator};
+use crate::alloc::string::ToString;
 use core::ptr::NonNull;
 use core::marker::PhantomData;
 use alloc::vec::Vec;
@@ -14,6 +15,7 @@ use alloc::vec::Vec;
 /// 
 /// `ComponentInterface` describes the public interface of a WebAssembly
 /// component, including exported functions and their signatures.
+#[derive(Clone)]
 pub struct ComponentInterface {
     /// Component name
     pub name: String,

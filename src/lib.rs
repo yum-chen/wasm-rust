@@ -28,10 +28,11 @@ pub mod host;
 pub mod backend;
 pub mod wasmir;
 
-use backend::BackendFactory;
+use backend::{BackendFactory, Backend, CompilationResult};
 use wasmir::WasmIR;
 use rustc_middle::mir::Body;
 use rustc_target::spec::Target;
+use std::any::Any;
 
 /// WasmRust compiler version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -106,6 +107,47 @@ impl WasmRustCompiler {
         } else {
             context.into_wasmir()
                 .map_err(|e| format!("Failed to get WasmIR: {}", e.to_string()))
+        }
+    }
+
+    /// Compiles MIR directly to WASM using WasmIR bridge
+    pub fn compile_mir_to_wasm(&mut self, mir: &Body) -> Result<Vec<u8>, backend::BackendError> {
+        // Convert MIR to WasmIR
+        let mut wasmir = self.convert_mir_to_wasmir(mir)
+            .map_err(|e| backend::BackendError::CompilationFailed(e))?;
+        
+        // Use WASM code generation
+        let mut wasm_codegen = backend::cranelift::wasm_codegen::WasmCodegen::new();
+        let compilation_result = wasm_codegen.compile(&mut wasmir)?;
+        
+        Ok(compilation_result.code)
+    }
+
+    /// Compiles WasmIR to WASM with optimizations
+    pub fn compile_wasmir_to_wasm(&mut self, wasmir: &mut WasmIR) -> Result<Vec<u8>, backend::BackendError> {
+        let mut wasm_codegen = backend::cranelift::wasm_codegen::WasmCodegen::new();
+        let compilation_result = wasm_codegen.compile(wasmir)?;
+        
+        Ok(compilation_result.code)
+    }
+
+    /// Compiles using hybrid approach (WasmIR optimizations + WASM generation)
+    pub fn compile_hybrid(&mut self, mir: &Body) -> Result<Vec<u8>, backend::BackendError> {
+        // Convert MIR to WasmIR
+        let mut wasmir = self.convert_mir_to_wasmir(mir)
+            .map_err(|e| backend::BackendError::CompilationFailed(e))?;
+        
+        // Use hybrid compilation
+        let mut backend = BackendFactory::create_backend(
+            &self.target.arch,
+            backend::BuildProfile::Development,
+        )?;
+        
+        if let Some(cranelift_backend) = backend.downcast_mut::<backend::cranelift::WasmRustCraneliftBackend>() {
+            cranelift_backend.compile_hybrid(&mut wasmir)
+                .map_err(|e| backend::BackendError::CompilationFailed(format!("Hybrid compilation failed: {}", e)))
+        } else {
+            Err(backend::BackendError::Unsupported("Hybrid compilation requires Cranelift backend".to_string()))
         }
     }
 
