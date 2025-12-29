@@ -1,439 +1,109 @@
-# WasmIR Specification
+# WasmIR Specification (Version 1.0)
 
-## Overview
+## 1. Overview
 
-WasmIR (WasmRust Intermediate Representation) is a stable intermediate representation between the rustc frontend and WasmRust backends. It serves as the boundary layer that encodes WASM-specific optimizations, ownership annotations, and capability hints.
+WasmIR (WasmRust Intermediate Representation) is the stable, explicit semantic boundary between the Rust MIR and the WasmRust compiler backends. Its design is governed by the principle that every semantic transformation must be either proven equivalent to Rust MIR or explicitly declared as a new contract boundary.
 
-## Design Goals
+This document provides the formal specification for WasmIR. Any undocumented behavior is considered a bug.
 
-1. **Stability**: WasmIR provides a stable boundary between frontend and backends
-2. **Optimization**: Enables WASM-specific optimizations not available in standard Rust MIR
-3. **Safety**: Encodes ownership and type safety information for WebAssembly
-4. **Capability**: Supports capability annotations for host profile optimization
-5. **Performance**: Enables efficient code generation for WebAssembly targets
+## 2. Design Goals
 
-## Type System
+*   **Semantic Stability**: To provide a durable contract between the Rust frontend and Wasm-specific backends.
+*   **Invariant Enforcement**: To make Rust's ownership, aliasing, and lifetime invariants explicit and machine-readable.
+*   **Performance Modeling**: To enable sound, verifiable, and predictable WASM-specific optimizations.
+*   **WasmGC Readiness**: To be forward-compatible with the WebAssembly Garbage Collection (WasmGC) extension by design.
 
-### Core Types
+## 3. Type System
 
-#### Value Types
-```
-i32    // 32-bit signed integer
-i64    // 64-bit signed integer  
-f32    // 32-bit floating point
-f64    // 64-bit floating point
-```
+WasmIR's type system is designed to be sound and expressive, capturing both the semantics of Rust and the capabilities of WebAssembly.
 
-#### Reference Types
-```
-externref<T>    // JavaScript object reference (type-safe)
-funcref       // Function reference
-```
+### 3.1. Value Types
 
-#### Composite Types
-```
-array<T, N>     // Fixed-size array
-struct<T> {     // Structure with fields
+Value types represent raw data that can be manipulated directly by WASM instructions.
+
+*   `i32`: 32-bit integer
+*   `i64`: 64-bit integer
+*   `f32`: 32-bit floating-point
+*   `f64`: 64-bit floating-point
+
+### 3.2. Reference Types
+
+Reference types represent handles to resources or objects that are not directly mapped in linear memory.
+
+*   `externref`: An opaque reference to a host-provided object (e.g., a JavaScript object). It is non-nullable.
+*   `funcref`: A reference to a function. It is non-nullable.
+*   `anyref`: A nullable reference that can hold `externref`, `funcref`, or other reference types.
+
+### 3.3. Memory Model
+
+WasmIR defines two memory spaces:
+
+*   **Linear Memory**: A single, contiguous, and growable array of bytes, corresponding to WebAssembly's linear memory. Pointers into this memory are represented as `i32` or `i64`.
+*   **Reference Space**: A conceptual space where reference-typed values exist. These values are not directly addressable from linear memory.
+
+## 4. Instruction Set
+
+Each WasmIR instruction is defined with its syntax, operands, and a formal description of its semantics.
+
+### 4.1. Local Variable Instructions
+
+*   **Syntax**: `local.get <local_index>`
+    *   **Semantics**: Pushes the value of the local variable at `<local_index>` onto the value stack.
+*   **Syntax**: `local.set <local_index> <value>`
+    *   **Semantics**: Pops `<value>` from the value stack and stores it in the local variable at `<local_index>`.
+
+### 4.2. Control Flow Instructions
+
+*   **Syntax**: `br <block_id>`
+    *   **Semantics**: Unconditionally transfers control to the basic block identified by `<block_id>`.
+*   **Syntax**: `br_if <block_id> <condition>`
+    *   **Semantics**: Pops `<condition>` (an `i32`) from the value stack. If `<condition>` is non-zero, transfers control to `<block_id>`. Otherwise, execution continues to the next instruction.
+
+### 4.3. Ownership and Invariant Instructions
+
+These instructions make Rust's ownership and borrowing system explicit.
+
+*   **Syntax**: `linear.consume <value>`
+    *   **Semantics**: Consumes `<value>`, which must be of a linear type. This instruction marks the end of the value's lifetime. Any subsequent use of the same value is a validation error. This corresponds to a move in Rust.
+*   **Syntax**: `invariant.check.aliasing <ptr1> <ptr2>`
+    *   **Semantics**: Asserts that the memory ranges pointed to by `<ptr1>` and `<ptr2>` do not overlap. This makes the `noalias` invariant from Rust explicit for the optimizer.
+
+## 5. Contract Alignment
+
+WasmIR is designed to be a direct representation of the compiler ↔ crate contracts defined in `SAFETY.md`.
+
+*   **`SharedSlice<T>`**: A `SharedSlice` is lowered to a WasmIR struct containing an `i32` (pointer) and an `i32` (length). The invariant that `T` must be `Pod` is checked during the MIR-to-WasmIR lowering.
+*   **`ExternRef<T>`**: An `ExternRef` is lowered to the `externref` type in WasmIR. The compiler is responsible for ensuring that the handle is used in a way that is consistent with its lifetime.
+*   **Linear Types (`#[wasm::linear]`)**: A struct or resource marked `#[wasm::linear]` is treated as a linear type in WasmIR. The `linear.consume` instruction is emitted when the value is moved or goes out of scope, enforcing use-once semantics.
+
+## 6. Non-Goals
+
+WasmIR is *not*:
+
+*   A generic IR for arbitrary languages. It is specifically designed for Rust-to-WASM compilation.
+*   A representation of Rust's lifetime syntax. Lifetimes are checked and erased in the `rustc` frontend; WasmIR only deals with the resulting ownership and aliasing invariants.
+*   A stable format for long-term code distribution. It is an internal compiler representation, and its format may change between compiler versions.
+
+## 7. Examples
+
+The following are illustrative examples. The formal, testable mapping from Rust MIR to WasmIR is defined in the executable specification tests in `tests/wasmir_spec_snapshots.rs`.
+
+### Example: Simple `add` function
+
+**Rust:**
+```rust
+fn add(a: i32, b: i32) -> i32 {
+    a + b
 }
 ```
 
-#### Linear Types
+**Conceptual WasmIR:**
 ```
-linear<T>       // Use-once semantics (consumed after use)
+function "add"(param i32, param i32) -> i32 {
+  bb0:
+    v0 = local.get 0
+    v1 = local.get 1
+    v2 = i32.add v0, v1
+    return v2
+}
 ```
-
-### Memory Model
-
-#### Linear Memory
-- WebAssembly linear memory with bounds checking
-- Supports direct memory access through WASM instructions
-- Optional bounds checking for development builds
-- Zero-cost bounds removal for release builds
-
-#### Shared Memory
-- Thread-safe shared memory access
-- Atomic operations for synchronization
-- Support for SharedArrayBuffer in browsers
-
-## Instruction Set
-
-### Stack Operations
-```
-local.get N        // Get local variable N
-local.set N V      // Set local variable N to value V
-local.tee N V      // Get N and set N to V (return value)
-```
-
-### Constant Operations
-```
-i32.const V       // 32-bit integer constant
-i64.const V       // 64-bit integer constant
-f32.const V       // 32-bit float constant
-f64.const V       // 64-bit float constant
-```
-
-### Binary Operations
-```
-i32.add L R       // Integer addition
-i32.sub L R       // Integer subtraction
-i32.mul L R       // Integer multiplication
-i32.div_s L R     // Signed integer division
-i32.rem_s L R     // Signed remainder
-i32.and L R       // Bitwise AND
-i32.or L R        // Bitwise OR
-i32.xor L R       // Bitwise XOR
-i32.shl L R       // Left shift
-i32.shr_s L R     // Right shift (signed)
-i32.lt_s L R       // Signed less than
-i32.le_s L R       // Signed less than or equal
-i32.gt_s L R       // Signed greater than
-i32.ge_s L R       // Signed greater than or equal
-```
-
-### Unary Operations
-```
-i32.clz V         // Count leading zeros
-i32.ctz V         // Count trailing zeros
-i32.popcnt V      // Population count
-i32.eqz V         // Equal to zero
-```
-
-### Memory Operations
-```
-i32.load N align=O offset=N    // Load with optional alignment
-i32.store V align=O offset=N   // Store with optional alignment
-i32.load8_u N offset=N          // Load 8-bit unsigned
-i32.store8 V offset=N            // Store 8-bit
-i32.load16_u N offset=N         // Load 16-bit unsigned
-i32.store16 V offset=N            // Store 16-bit
-```
-
-### Control Flow
-```
-br target                    // Unconditional branch
-br_if cond target else_target // Conditional branch
-br_table V target0...targetN   // Branch table
-return V                    // Return value
-unreachable                  // Unreachable instruction
-```
-
-### Function Operations
-```
-call N args...             // Direct function call
-call_indirect V args...      // Indirect function call
-```
-
-### Reference Type Operations
-```
-externref.new N              // Create new external reference
-externref.get V field         // Get field from external reference
-externref.set V field V       // Set field on external reference
-funcref.new N               // Create function reference
-```
-
-### Component Model Operations
-```
-component.start                 // Start component instance
-component.import N               // Import from component
-component.export N               // Export to component
-```
-
-## Ownership Annotations
-
-### Linear Types
-```
-linear.consume V           // Consume linear value
-linear.move V              // Move linear value
-linear.clone V             // Clone linear value (if supported)
-linear.drop V             // Drop linear value
-```
-
-### Capabilities
-
-### Threading
-```
-capability.threading         // Threading capability
-capability.atomic           // Atomic operations
-capability.shared_memory     // Shared memory access
-```
-
-### JavaScript Interop
-```
-capability.js_interop       // JavaScript interop
-capability.externref         // External reference support
-capability.funcref         // Function reference support
-```
-
-### Memory Regions
-```
-capability.memory_region "eu-west-1"    // Geographic memory region
-capability.memory_encryption "AES256-GCM" // Memory encryption
-```
-
-## Optimization Hints
-
-### Call Convention
-```
-call.indirect V signature=fast    // Fast calling convention
-call.tail V                   // Tail call optimization
-```
-
-### Memory Access Patterns
-```
-memory.access_pattern streaming     // Streaming access
-memory.access_pattern random       // Random access
-memory.access_pattern sequential   // Sequential access
-```
-
-### Hot/Cold Separation
-```
-attribute.hot function_name          // Mark function as hot
-attribute.cold function_name         // Mark function as cold
-attribute.inline threshold=N         // Inline threshold
-```
-
-## Validation Rules
-
-### Type Checking
-1. All operations must be type-safe
-2. Reference types must match their target types
-3. Linear types must follow use-once semantics
-4. Array bounds must be enforced where possible
-
-### Control Flow
-1. All branches must target valid basic blocks
-2. Switch tables must be valid
-3. Unreachable code must be properly marked
-
-### Memory Safety
-1. All memory accesses must be within bounds
-2. Shared memory must use atomic operations
-3. Linear memory must prevent use-after-free
-
-### Component Model
-1. All imports/exports must match interface definitions
-2. Component boundaries must be validated
-3. Type signatures must be compatible
-
-## Implementation Guidelines
-
-### Backend Mapping
-1. Instructions map directly to WebAssembly opcodes
-2. Types map to WebAssembly value types
-3. Memory layout matches WebAssembly linear memory
-4. Function signatures match WebAssembly calling convention
-
-### Optimization Strategy
-1. Instruction selection based on target capabilities
-2. Register allocation optimized for WebAssembly
-3. Code layout optimized for streaming
-4. Dead code elimination for unused functions
-
-### Error Handling
-1. All validation errors must be precise and informative
-2. Type errors must include expected vs actual types
-3. Bounds errors must include safe alternatives
-4. Capability errors must suggest alternatives
-
-## Examples
-
-### Simple Function
-```rust
-// WasmIR for: fn add(a: i32, b: i32) -> i32
-let signature = Signature {
-    params: vec![Type::I32, Type::I32],
-    returns: Some(Type::I32),
-};
-
-let mut func = WasmIR::new("add", signature);
-let local_a = func.add_local(Type::I32);
-let local_b = func.add_local(Type::I32);
-let local_result = func.add_local(Type::I32);
-
-let instructions = vec![
-    Instruction::LocalGet { index: local_a },
-    Instruction::LocalGet { index: local_b },
-    Instruction::BinaryOp {
-        op: BinaryOp::Add,
-        left: Operand::Local(local_result),
-        right: Operand::Local(local_b),
-    },
-    Instruction::LocalSet { 
-        index: local_result,
-        value: Operand::Local(0), // Result of addition
-    },
-    Instruction::Return { 
-        value: Some(Operand::Local(local_result))
-    },
-];
-
-let terminator = Terminator::Return {
-    value: Some(Operand::Local(local_result)),
-};
-
-func.add_basic_block(instructions, terminator);
-```
-
-### Memory Access Function
-```rust
-// WasmIR for: fn store_and_read(ptr: *mut i32, value: i32) -> i32
-let signature = Signature {
-    params: vec![Type::I32, Type::I32],  // ptr, value
-    returns: Some(Type::I32),
-};
-
-let mut func = WasmIR::new("store_and_read", signature);
-let local_ptr = func.add_local(Type::I32);
-let local_value = func.add_local(Type::I32);
-let local_loaded = func.add_local(Type::I32);
-
-let instructions = vec![
-    Instruction::LocalGet { index: local_ptr },
-    Instruction::LocalGet { index: local_value },
-    Instruction::MemoryStore {
-        address: Operand::Local(local_ptr),
-        value: Operand::Local(local_value),
-        ty: Type::I32,
-        align: Some(4),
-        offset: 0,
-    },
-    Instruction::LocalGet { index: local_ptr },
-    Instruction::MemoryLoad {
-        address: Operand::Local(local_ptr),
-        ty: Type::I32,
-        align: Some(4),
-        offset: 0,
-    },
-    Instruction::LocalSet {
-        index: local_loaded,
-        value: Operand::Local(1), // Loaded value
-    },
-    Instruction::Return {
-        value: Some(Operand::Local(local_loaded)),
-    },
-];
-
-let terminator = Terminator::Return {
-    value: Some(Operand::Local(local_loaded)),
-};
-
-func.add_basic_block(instructions, terminator);
-```
-
-### Component Export
-```rust
-// WasmIR for: #[wasm::export] fn compute(x: i32) -> i32
-let signature = Signature {
-    params: vec![Type::I32],
-    returns: Some(Type::I32),
-};
-
-let mut func = WasmIR::new("compute", signature);
-func.add_capability(Capability::ComponentModel);
-
-let local_x = func.add_local(Type::I32);
-let local_result = func.add_local(Type::I32);
-
-// Function that squares the input
-let instructions = vec![
-    Instruction::LocalGet { index: local_x },
-    Instruction::BinaryOp {
-        op: BinaryOp::Mul,
-        left: Operand::Local(local_x),
-        right: Operand::Local(local_x),
-    },
-    Instruction::LocalSet {
-        index: local_result,
-        value: Operand::Local(0),
-    },
-    Instruction::Return {
-        value: Some(Operand::Local(local_result)),
-    },
-];
-
-let terminator = Terminator::Return {
-    value: Some(Operand::Local(local_result)),
-};
-
-func.add_basic_block(instructions, terminator);
-```
-
-## Migration Strategy
-
-### From Rust MIR
-1. Convert function signatures and types
-2. Map basic blocks and control flow
-3. Preserve debug information and source locations
-4. Add capability annotations from attributes
-
-### To WebAssembly
-1. Direct instruction mapping where possible
-2. Optimize for WebAssembly execution model
-3. Apply WASM-specific optimizations
-4. Generate efficient code layout
-
-### Versioning
-1. WasmIR version is tied to WasmRust compiler version
-2. Backward compatibility guaranteed within major versions
-3. Migration path provided for breaking changes
-4. Tool support for automated migration
-
-## Tooling Support
-
-### Validation
-- WasmIR validator for type checking
-- Control flow analysis tools
-- Memory safety verification
-- Component model compliance checking
-
-### Optimization
-- Instruction selector for different targets
-- Register allocator for WebAssembly
-- Code layout optimizer
-- Dead code eliminator
-
-### Debugging
-- Source location preservation
-- Variable naming preservation
-- Basic block visualization
-- Instruction-level debugging
-
-## Performance Considerations
-
-### Code Size
-- Prefer 32-bit operations where possible
-- Use immediate values efficiently
-- Optimize for binary size
-- Eliminate unused code aggressively
-
-### Execution Speed
-- Optimize hot paths aggressively
-- Use efficient instruction sequences
-- Minimize memory traffic
-- Exploit WebAssembly parallelism
-
-### Memory Usage
-- Stack allocation optimization
-- Register pressure management
-- Memory layout optimization
-- Garbage collection avoidance
-
-## Security Considerations
-
-### Type Safety
-- Strong type enforcement
-- Memory bounds checking
-- Reference type validation
-- Component boundary enforcement
-
-### Code Injection
-- Instruction validation
-- Control flow verification
-- Memory access validation
-- Component isolation
-
-### Side Channels
-- Speculative execution prevention
-- Constant-time operations
-- Memory access pattern randomization
-- Component isolation enforcement

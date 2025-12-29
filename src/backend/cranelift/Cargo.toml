@@ -11,8 +11,8 @@ path = "lib.rs"
 
 [dependencies]
 wasm = { path = "../../../crates/wasm" }
-# rustc_codegen_cranelift = "0.99.0"  # Placeholder - version doesn't exist yet
-# cranelift-codegen-meta = "0.99.0"     # Placeholder - version doesn't exist yet
+rustc_codegen_cranelift = { path = "../../../vendor/rustc_codegen_cranelift/compiler" }
+cranelift-codegen-meta = { path = "../../../vendor/rustc_codegen_cranelift/cranelift/codegen/meta" }
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 # Browser-specific optimizations
