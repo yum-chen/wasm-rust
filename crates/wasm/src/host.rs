@@ -5,7 +5,39 @@
 //! capability detection and graceful fallbacks.
 
 use core::ffi::c_void;
-use crate::InteropError;
+
+/// JavaScript interop errors
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InteropError {
+    /// Type mismatch error
+    TypeMismatch(String),
+    /// Method not found
+    MethodNotFound(String),
+    /// Property not found
+    PropertyNotFound(String),
+    /// Unsupported operation
+    UnsupportedOperation,
+    /// Invalid handle
+    InvalidHandle,
+    /// Host error
+    HostError(String),
+    /// Conversion error
+    ConversionError(String),
+}
+
+impl core::fmt::Display for InteropError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            InteropError::TypeMismatch(msg) => write!(f, "Type mismatch: {}", msg),
+            InteropError::MethodNotFound(method) => write!(f, "Method not found: {}", method),
+            InteropError::PropertyNotFound(prop) => write!(f, "Property not found: {}", prop),
+            InteropError::UnsupportedOperation => write!(f, "Unsupported operation"),
+            InteropError::InvalidHandle => write!(f, "Invalid handle"),
+            InteropError::HostError(msg) => write!(f, "Host error: {}", msg),
+            InteropError::ConversionError(msg) => write!(f, "Conversion error: {}", msg),
+        }
+    }
+}
 
 /// Supported host environments
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

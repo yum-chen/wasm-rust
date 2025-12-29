@@ -121,14 +121,24 @@ impl core::fmt::Display for WasmError {
 /// The compiler must not:
 /// - Assume zeroed memory is valid unless proven
 /// - Insert hidden validation or runtime checks
-pub unsafe trait Pod: 'static {
+///
+/// ## Implementation Restrictions
+///
+/// This trait is sealed and cannot be implemented outside this crate.
+/// Use the provided implementations or request additions via the crate maintainers.
+pub unsafe trait Pod: Copy + Send + Sync + 'static + private::Sealed {
     /// Returns true if the type is valid for zero-copy sharing
     fn is_valid_for_sharing() -> bool {
         true
     }
 }
 
-// Implement Pod for primitive types
+/// Private module to seal the Pod trait
+mod private {
+    pub trait Sealed {}
+}
+
+// Implement Pod for primitive types with sealed trait
 unsafe impl Pod for u8 {}
 unsafe impl Pod for u16 {}
 unsafe impl Pod for u32 {}
@@ -142,9 +152,34 @@ unsafe impl Pod for f64 {}
 unsafe impl Pod for bool {}
 unsafe impl Pod for () {}
 
-/// Implement Pod for arrays of Pod types
-unsafe impl<T: Pod> Pod for [T] {}
-unsafe impl<T: Pod, const N: usize> Pod for [T; N] {}
+// Implement Sealed for primitive types
+impl private::Sealed for u8 {}
+impl private::Sealed for u16 {}
+impl private::Sealed for u32 {}
+impl private::Sealed for u64 {}
+impl private::Sealed for i8 {}
+impl private::Sealed for i16 {}
+impl private::Sealed for i32 {}
+impl private::Sealed for i64 {}
+impl private::Sealed for f32 {}
+impl private::Sealed for f64 {}
+impl private::Sealed for bool {}
+impl private::Sealed for () {}
+
+/// Implement Pod for arrays of Pod types with compile-time verification
+unsafe impl<T: Pod, const N: usize> Pod for [T; N] {
+    fn is_valid_for_sharing() -> bool {
+        // Verify T is actually Pod and array has no padding
+        T::is_valid_for_sharing() && 
+        core::mem::size_of::<[T; N]>() == N * core::mem::size_of::<T>() &&
+        core::mem::align_of::<[T; N]>() == core::mem::align_of::<T>()
+    }
+}
+
+impl<T: Pod, const N: usize> private::Sealed for [T; N] {}
+
+// Note: Slices [T] cannot implement Pod as they are unsized
+// Users must work with SharedSlice<'a, T> instead
 /// ExternRef<T> - Type-safe JavaScript object reference
 /// 
 /// This type provides zero-cost wrapper for JavaScript objects with
@@ -250,7 +285,7 @@ impl<T> ExternRef<T> {
         // SAFETY: Property access is guarded by null check and type validation
         // The host guarantees that handle refers to a valid object of type T
         unsafe {
-            host::get_property_checked::<V>(self.handle, property)
+            host::get_property_checked::<R>(self.handle, property)
                 .map_err(|e| WasmError::HostError(e))
         }
     }
@@ -285,7 +320,7 @@ impl<T> ExternRef<T> {
         // SAFETY: Property mutation is guarded by null check and type validation
         // The host guarantees atomic property mutation for the object type
         unsafe {
-            host::set_property_checked::<T>(self.handle, property, value)
+            host::set_property_checked::<V>(self.handle, property, value)
                 .map_err(|e| WasmError::HostError(e))
         }
     }
@@ -920,6 +955,31 @@ impl JsValue for bool {
         host::convert_bool_to_js(*self)
             .map_err(|e| WasmError::HostError(e))
     }
+}
+
+/// Static assertions to verify zero-cost guarantees
+mod static_assertions {
+    use super::*;
+    use core::mem::{size_of, align_of};
+
+    // Verify ExternRef is zero-cost
+    const _: () = assert!(size_of::<ExternRef<()>>() == size_of::<u32>());
+    const _: () = assert!(align_of::<ExternRef<()>>() == align_of::<u32>());
+    const _: () = assert!(size_of::<ExternRef<i32>>() == size_of::<u32>());
+    
+    // Verify FuncRef is zero-cost
+    const _: () = assert!(size_of::<FuncRef<(), ()>>() == size_of::<u32>());
+    const _: () = assert!(align_of::<FuncRef<(), ()>>() == align_of::<u32>());
+    const _: () = assert!(size_of::<FuncRef<(i32, i32), i32>>() == size_of::<u32>());
+    
+    // Verify SharedSlice has expected layout
+    const _: () = assert!(size_of::<SharedSlice<u8>>() == size_of::<*const u8>() + size_of::<usize>());
+    const _: () = assert!(align_of::<SharedSlice<u8>>() >= align_of::<*const u8>());
+    
+    // Verify Pod types have no padding
+    const _: () = assert!(size_of::<[u8; 4]>() == 4 * size_of::<u8>());
+    const _: () = assert!(size_of::<[u32; 2]>() == 2 * size_of::<u32>());
+    const _: () = assert!(size_of::<[f64; 3]>() == 3 * size_of::<f64>());
 }
 
 /// WASM runtime initialization

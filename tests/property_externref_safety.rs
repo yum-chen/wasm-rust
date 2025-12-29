@@ -7,8 +7,7 @@
 //! Validates: Requirements 4.1, 4.2
 
 use wasm::ExternRef;
-use wasm::host::{HostProfile, get_host_capabilities};
-use wasm::InteropError;
+use wasm::host::{HostProfile, get_host_capabilities, InteropError};
 use quickcheck::{Arbitrary, Gen, QuickCheck, TestResult};
 use std::time::Instant;
 
@@ -36,7 +35,7 @@ mod tests {
         fn validate_property(property: &str) -> Result<(), InteropError> {
             match property {
                 "data" | "id" => Ok(()),
-                _ => Err(InteropError::TypeMismatch),
+                _ => Err(InteropError::TypeMismatch("Invalid property".to_string())),
             }
         }
     }
