@@ -4,6 +4,7 @@ members = [
   "crates/wasm",
   "src/backend/cranelift",
   "src/backend/llvm",
+  "src/wasmir",
 ]
 
 [workspace.dependencies]

@@ -5,7 +5,6 @@
 //! the boundary layer that encodes WASM-specific optimizations,
 //! ownership annotations, and capability hints.
 
-use std::collections::HashMap;
 use std::fmt;
 
 /// WasmIR - Stable Intermediate Representation
@@ -28,6 +27,9 @@ pub struct WasmIR {
     /// Ownership annotations for linear types
     pub ownership_annotations: Vec<OwnershipAnnotation>,
 }
+
+#[cfg(test)]
+mod executable_tests;
 
 /// Function signature in WasmIR
 #[derive(Debug, Clone, PartialEq)]
@@ -267,7 +269,7 @@ pub enum Operand {
     FuncRef(u32),
     
     /// Memory address
-    MemoryAddress(Operand),
+    MemoryAddress(Box<Operand>),
     
     /// Stack value (temporary)
     StackValue(u32),
@@ -462,7 +464,7 @@ impl WasmIR {
         }
 
         // Check that all operand indices are valid
-        for instruction in &self.basic_blocks.iter().flat_map(|bb| &bb.instructions) {
+        for instruction in self.basic_blocks.iter().flat_map(|bb| &bb.instructions) {
             self.validate_instruction_operands(instruction)?;
         }
 
@@ -596,7 +598,7 @@ impl WasmIR {
 }
 
 /// Validation errors for WasmIR
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ValidationError {
     /// Invalid local variable index
     InvalidLocalIndex(u32),
@@ -647,7 +649,7 @@ mod tests {
 
     #[test]
     fn test_basic_block_addition() {
-        let func = WasmIR::new("test".to_string(), Signature {
+        let mut func = WasmIR::new("test".to_string(), Signature {
             params: vec![Type::I32],
             returns: Some(Type::I32),
         });
@@ -674,7 +676,7 @@ mod tests {
 
     #[test]
     fn test_local_variable_addition() {
-        let func = WasmIR::new("test".to_string(), Signature {
+        let mut func = WasmIR::new("test".to_string(), Signature {
             params: vec![Type::I32],
             returns: Some(Type::I32),
         });
@@ -692,7 +694,7 @@ mod tests {
 
     #[test]
     fn test_capability_annotation() {
-        let func = WasmIR::new("test".to_string(), Signature {
+        let mut func = WasmIR::new("test".to_string(), Signature {
             params: vec![Type::I32],
             returns: Some(Type::I32),
         });
@@ -707,7 +709,7 @@ mod tests {
 
     #[test]
     fn test_validation_valid_function() {
-        let func = WasmIR::new("test".to_string(), Signature {
+        let mut func = WasmIR::new("test".to_string(), Signature {
             params: vec![Type::I32, Type::I32],
             returns: Some(Type::I32),
         });
@@ -727,7 +729,7 @@ mod tests {
 
     #[test]
     fn test_validation_invalid_local_index() {
-        let func = WasmIR::new("test".to_string(), Signature {
+        let mut func = WasmIR::new("test".to_string(), Signature {
             params: vec![Type::I32],
             returns: Some(Type::I32),
         });
@@ -750,7 +752,7 @@ mod tests {
 
     #[test]
     fn test_instruction_count() {
-        let func = WasmIR::new("test".to_string(), Signature {
+        let mut func = WasmIR::new("test".to_string(), Signature {
             params: vec![Type::I32],
             returns: Some(Type::I32),
         });
@@ -776,14 +778,14 @@ mod tests {
 
     #[test]
     fn test_used_locals() {
-        let func = WasmIR::new("test".to_string(), Signature {
+        let mut func = WasmIR::new("test".to_string(), Signature {
             params: vec![Type::I32],
             returns: Some(Type::I32),
         });
         
         let local1 = func.add_local(Type::I32);
         let local2 = func.add_local(Type::I32);
-        let _local3 = func.add_local(Type::I32);
+        let local3 = func.add_local(Type::I32);
         
         let instructions = vec![
             Instruction::LocalGet { index: local1 },
