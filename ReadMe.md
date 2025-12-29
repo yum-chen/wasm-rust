@@ -1,6 +1,6 @@
 # WasmRust
 
-> Native Rust for Systems, GC-Ready Rust for WebAssembly
+> Native Rust for Systems, GC Rust for WASM
 
 ## Overview
 
@@ -8,7 +8,7 @@
 It represents a **systems-grade Rust specialization** that treats **WebAssembly as a first-class target machine**, not merely a secondary compilation backend.
 
 > **Native Rust for systems.
-> GC-ready Rust for WebAssembly.**
+> GC Rust for WebAssembly.**
 
 WasmRust maintains full compatibility with **standard Rust semantics, tooling, and ecosystem**, while enabling **WASM-native execution models** — including future **WasmGC** support — without requiring a new language or a fork of Rust.
 
@@ -70,7 +70,7 @@ WasmRust = rustc + WASM specialization
 
 ---
 
-## Native Rust vs GC-Ready Rust (Mental Model)
+## Native Rust vs GC Rust (Mental Model)
 
 | Domain         | Execution Model                                  |
 | -------------- | ------------------------------------------------ |
@@ -192,7 +192,7 @@ Both backends compile the **identical Rust source code** and respect the same se
 | Rust language fork           | ❌        |
 | JavaScript-centric design    | ❌        |
 | WASM-native semantic modeling| ✅        |
-| GC-ready architecture        | ✅        |
+| GC architecture        | ✅        |
 | Zero-cost abstractions       | ✅        |
 | Compiler-verified invariants | ✅        |
 
