@@ -333,7 +333,7 @@ pub enum Operand {
 }
 
 /// Constant values
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Constant {
     I32(i32),
     I64(i64),
@@ -385,7 +385,7 @@ pub enum Type {
 }
 
 /// Capability annotations for optimization
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Capability {
     /// JavaScript interop capability
     JsInterop,
@@ -690,6 +690,7 @@ impl fmt::Display for ValidationError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     #[test]
     fn test_simple_function_creation() {
@@ -706,7 +707,7 @@ mod tests {
 
     #[test]
     fn test_basic_block_addition() {
-        let func = WasmIR::new("test".to_string(), Signature {
+        let mut func = WasmIR::new("test".to_string(), Signature {
             params: vec![Type::I32],
             returns: Some(Type::I32),
         });
@@ -733,7 +734,7 @@ mod tests {
 
     #[test]
     fn test_local_variable_addition() {
-        let func = WasmIR::new("test".to_string(), Signature {
+        let mut func = WasmIR::new("test".to_string(), Signature {
             params: vec![Type::I32],
             returns: Some(Type::I32),
         });
@@ -751,7 +752,7 @@ mod tests {
 
     #[test]
     fn test_capability_annotation() {
-        let func = WasmIR::new("test".to_string(), Signature {
+        let mut func = WasmIR::new("test".to_string(), Signature {
             params: vec![Type::I32],
             returns: Some(Type::I32),
         });
@@ -766,7 +767,7 @@ mod tests {
 
     #[test]
     fn test_validation_valid_function() {
-        let func = WasmIR::new("test".to_string(), Signature {
+        let mut func = WasmIR::new("test".to_string(), Signature {
             params: vec![Type::I32, Type::I32],
             returns: Some(Type::I32),
         });
@@ -786,7 +787,7 @@ mod tests {
 
     #[test]
     fn test_validation_invalid_local_index() {
-        let func = WasmIR::new("test".to_string(), Signature {
+        let mut func = WasmIR::new("test".to_string(), Signature {
             params: vec![Type::I32],
             returns: Some(Type::I32),
         });
@@ -809,7 +810,7 @@ mod tests {
 
     #[test]
     fn test_instruction_count() {
-        let func = WasmIR::new("test".to_string(), Signature {
+        let mut func = WasmIR::new("test".to_string(), Signature {
             params: vec![Type::I32],
             returns: Some(Type::I32),
         });
@@ -835,7 +836,7 @@ mod tests {
 
     #[test]
     fn test_used_locals() {
-        let func = WasmIR::new("test".to_string(), Signature {
+        let mut func = WasmIR::new("test".to_string(), Signature {
             params: vec![Type::I32],
             returns: Some(Type::I32),
         });

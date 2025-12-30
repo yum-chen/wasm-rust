@@ -329,7 +329,7 @@ pub enum Operand {
 }
 
 /// Constant values
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Constant {
     I32(i32),
     I64(i64),
@@ -381,7 +381,7 @@ pub enum Type {
 }
 
 /// Capability annotations for optimization
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Capability {
     /// JavaScript interop capability
     JsInterop,
