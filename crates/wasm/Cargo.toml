@@ -32,6 +32,16 @@ name = "structure_tests"
 path = "../../tests/structure_tests.rs"
 required-features = []
 
+[[test]]
+name = "property_externref_safety"
+path = "../../tests/property_externref_safety.rs"
+required-features = []
+
+[[test]]
+name = "property_sharedslice_safety"
+path = "../../tests/property_sharedslice_safety.rs"
+required-features = []
+
 [dev-dependencies]
 quickcheck = { workspace = true }
 

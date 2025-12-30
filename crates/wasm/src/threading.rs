@@ -4,7 +4,11 @@
 //! WebAssembly environments, including thread-safe data structures
 //! and capability detection for different host environments.
 
-use crate::host::{get_host_capabilities, HostCapabilities};
+use crate::host::{get_host_capabilities};
+use alloc::string::{String, ToString};
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+use alloc::format;
 use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use core::ptr::NonNull;
 use core::marker::PhantomData;

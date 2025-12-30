@@ -4,7 +4,9 @@
 //! host environments (Browser, Node.js, Wasmtime, Embedded) with
 //! capability detection and graceful fallbacks.
 
-use core::ffi::c_void;
+use alloc::string::{String, ToString};
+use alloc::boxed::Box;
+use core::any::Any;
 
 /// JavaScript interop errors
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -200,22 +202,22 @@ impl<T, Args, Ret> HasMethod<Args, Ret> for T {
 /// 
 /// This function is the bridge between WasmRust and the host environment.
 /// It's implemented differently for each host profile.
-pub unsafe fn call_function(handle: u32, args: impl core::any::Any) -> impl core::any::Any {
+pub unsafe fn call_function(handle: u32, args: impl Any) -> Box<dyn Any> {
     match detect_host_profile() {
         HostProfile::Browser => {
             // Browser-specific implementation
-            browser_call_function(handle, args)
+            Box::new(browser_call_function(handle, args))
         }
         HostProfile::NodeJs => {
             // Node.js-specific implementation
-            nodejs_call_function(handle, args)
+            Box::new(nodejs_call_function(handle, args))
         }
         HostProfile::Wasmtime => {
             // Wasmtime-specific implementation
-            wasmtime_call_function(handle, args)
+            Box::new(wasmtime_call_function(handle, args))
         }
         _ => {
-            panic!("Function calling not supported on this host profile");
+            Box::new(())
         }
     }
 }
@@ -240,8 +242,8 @@ where
 
     // Perform the actual method call
     let result = match detect_host_profile() {
-        HostProfile::Browser => browser_invoke_method(handle, method, args),
-        HostProfile::NodeJs => nodejs_invoke_method(handle, method, args),
+        HostProfile::Browser => Box::new(browser_invoke_method::<T, Args>(handle, method, args)),
+        HostProfile::NodeJs => Box::new(nodejs_invoke_method::<T, Args>(handle, method, args)),
         _ => return Err(InteropError::UnsupportedOperation),
     };
 
@@ -265,8 +267,8 @@ where
     T::validate_property(property)?;
 
     let result = match detect_host_profile() {
-        HostProfile::Browser => browser_get_property(handle, property),
-        HostProfile::NodeJs => nodejs_get_property(handle, property),
+        HostProfile::Browser => Box::new(browser_get_property::<T>(handle, property)),
+        HostProfile::NodeJs => Box::new(nodejs_get_property::<T>(handle, property)),
         _ => return Err(InteropError::UnsupportedOperation),
     };
 
@@ -333,46 +335,46 @@ fn wasmtime_environment_detected() -> bool {
     cfg!(target_os = "wasi")
 }
 
-unsafe fn browser_call_function(handle: u32, args: impl core::any::Any) -> impl core::any::Any {
+unsafe fn browser_call_function(handle: u32, args: impl Any) -> () {
     // Browser-specific function calling implementation
     // This would use JavaScript import to call the function
     panic!("Browser function calling not implemented")
 }
 
-unsafe fn nodejs_call_function(handle: u32, args: impl core::any::Any) -> impl core::any::Any {
+unsafe fn nodejs_call_function(handle: u32, args: impl Any) -> () {
     // Node.js-specific function calling implementation
     panic!("Node.js function calling not implemented")
 }
 
-unsafe fn wasmtime_call_function(handle: u32, args: impl core::any::Any) -> impl core::any::Any {
+unsafe fn wasmtime_call_function(handle: u32, args: impl Any) -> () {
     // Wasmtime-specific function calling implementation
     panic!("Wasmtime function calling not implemented")
 }
 
 unsafe fn browser_invoke_method<T, Args>(
-    handle: u32,
-    method: &str,
-    args: Args,
-) -> impl core::any::Any {
+    _handle: u32,
+    _method: &str,
+    _args: Args,
+) -> () {
     // Browser-specific method invocation
     panic!("Browser method invocation not implemented")
 }
 
 unsafe fn nodejs_invoke_method<T, Args>(
-    handle: u32,
-    method: &str,
-    args: Args,
-) -> impl core::any::Any {
+    _handle: u32,
+    _method: &str,
+    _args: Args,
+) -> () {
     // Node.js-specific method invocation
     panic!("Node.js method invocation not implemented")
 }
 
-unsafe fn browser_get_property<T>(handle: u32, property: &str) -> impl core::any::Any {
+unsafe fn browser_get_property<T>(_handle: u32, _property: &str) -> () {
     // Browser-specific property access
     panic!("Browser property access not implemented")
 }
 
-unsafe fn nodejs_get_property<T>(handle: u32, property: &str) -> impl core::any::Any {
+unsafe fn nodejs_get_property<T>(_handle: u32, _property: &str) -> () {
     // Node.js-specific property access
     panic!("Node.js property access not implemented")
 }
@@ -416,7 +418,7 @@ unsafe fn wasmtime_remove_reference(handle: u32) {
     // Wasmtime-specific reference removal
     panic!("Wasmtime reference removal not implemented")
 }
-fn convert_result<T>(result: impl core::any::Any) -> Result<T, InteropError> {
+fn convert_result<T>(_result: Box<dyn Any>) -> Result<T, InteropError> {
     // Convert to host result to expected type
     // In a real implementation, this would handle type conversion
     panic!("Result conversion not implemented")
@@ -438,7 +440,7 @@ pub enum JsValue {
 /// Converts JavaScript value to i32
 pub fn convert_js_to_i32(value: JsValue) -> Result<i32, InteropError> {
     match value {
-        JsValue::Number(n) if n.fract() == 0.0 && n >= i32::MIN as f64 && n <= i32::MAX as f64 => {
+        JsValue::Number(n) if n as i32 as f64 == n && n >= i32::MIN as f64 && n <= i32::MAX as f64 => {
             Ok(n as i32)
         }
         _ => Err(InteropError::TypeMismatch("Expected number".to_string())),

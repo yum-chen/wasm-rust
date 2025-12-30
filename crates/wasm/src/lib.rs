@@ -5,19 +5,18 @@
 //! zero-cost wrappers, and safe memory abstractions.
 
 #![no_std]
-#![feature(extern_types)]
-#![feature(unsize)]
-#![feature(coerce_unsized)]
-#![feature(generic_associated_types)]
-#![feature(min_specialization)]
-#![feature(const_fn)]
-#![feature(const_mut_refs)]
+// Remove unstable features for now - will add back when needed
+// #![feature(extern_types)]
+// #![feature(unsize)]
+// #![feature(coerce_unsized)]
+// #![feature(min_specialization)]
 
 extern crate alloc;
 use alloc::vec::Vec;
-use alloc::string::ToString;
+use alloc::string::{String, ToString};
+use alloc::boxed::Box;
 use core::marker::PhantomData;
-use core::ptr::{self, NonNull};
+use core::ptr::NonNull;
 use core::slice;
 use core::mem;
 use core::ops::{Deref, DerefMut, Index, IndexMut};
@@ -45,7 +44,7 @@ pub enum WasmError {
     /// Memory error
     MemoryError(memory::MemoryError),
     /// Threading error
-    ThreadingError(threading::ThreadError),
+    ThreadingError(threading::ThreadingError),
     /// Component error
     ComponentError(component::ComponentError),
 }
@@ -57,8 +56,8 @@ impl From<memory::MemoryError> for WasmError {
     }
 }
 
-impl From<threading::ThreadError> for WasmError {
-    fn from(err: threading::ThreadError) -> Self {
+impl From<threading::ThreadingError> for WasmError {
+    fn from(err: threading::ThreadingError) -> Self {
         WasmError::ThreadingError(err)
     }
 }
@@ -213,6 +212,7 @@ impl<T: Pod, const N: usize> private::Sealed for [T; N] {}
 /// The compiler must not assume:
 /// - Any relationship to linear memory
 /// - Dereferenceable data
+#[derive(Debug)]
 #[repr(transparent)]
 pub struct ExternRef<T: ?Sized> {
     /// Internal handle to the JavaScript object
@@ -514,6 +514,18 @@ pub struct SharedSlice<'a, T: Pod> {
     _phantom: PhantomData<&'a [T]>,
 }
 
+// SAFETY: SharedSlice is safe to send between threads because:
+// - T: Pod guarantees no interior mutability
+// - The data is immutable for the lifetime 'a
+// - NonNull<T> is just a pointer, safe to send when T: Send
+unsafe impl<'a, T: Pod + Send> Send for SharedSlice<'a, T> {}
+
+// SAFETY: SharedSlice is safe to share between threads because:
+// - T: Pod guarantees race-free shared access
+// - The slice is read-only
+// - All operations are bounds-checked
+unsafe impl<'a, T: Pod + Sync> Sync for SharedSlice<'a, T> {}
+
 impl<'a, T: Pod> SharedSlice<'a, T> {
     /// Creates a new SharedSlice from a raw pointer and length
     /// 
@@ -563,7 +575,7 @@ impl<'a, T: Pod> SharedSlice<'a, T> {
         // Check if threading is available for mutable access
         if !caps.threading {
             return Err(WasmError::ThreadingError(
-                threading::ThreadError::ThreadingNotSupported
+                threading::ThreadingError::ThreadingNotSupported
             ));
         }
 
@@ -601,7 +613,7 @@ impl<'a, T: Pod> SharedSlice<'a, T> {
         
         if !caps.threading {
             return Err(WasmError::ThreadingError(
-                threading::ThreadError::ThreadingNotSupported
+                threading::ThreadingError::ThreadingNotSupported
             ));
         }
 
@@ -623,7 +635,7 @@ impl<'a, T: Pod> SharedSlice<'a, T> {
         
         if !caps.threading {
             return Err(WasmError::ThreadingError(
-                threading::ThreadError::ThreadingNotSupported
+                threading::ThreadingError::ThreadingNotSupported
             ));
         }
 
@@ -653,7 +665,7 @@ impl<'a, T: Pod> SharedSlice<'a, T> {
         
         if !caps.threading {
             return Err(WasmError::ThreadingError(
-                threading::ThreadError::ThreadingNotSupported
+                threading::ThreadingError::ThreadingNotSupported
             ));
         }
 
@@ -817,7 +829,7 @@ impl<T: Pod> SharedMemory<T> {
         Ok(Self {
             base: NonNull::new(base as *mut T)
                 .expect("Shared memory allocation returned null"),
-            size,
+            size: size * mem::size_of::<T>(),
             mutable,
         })
     }
@@ -1026,7 +1038,7 @@ mod tests {
 
     #[test]
     fn test_externref_creation() {
-        let extern_ref = ExternRef::<i32>::from_handle(42);
+        let extern_ref = unsafe { ExternRef::<i32>::from_handle(42) };
         assert_eq!(extern_ref.handle(), 42);
         assert!(!extern_ref.is_null());
 
@@ -1037,9 +1049,9 @@ mod tests {
 
     #[test]
     fn test_externref_equality() {
-        let ref1 = ExternRef::<i32>::from_handle(42);
-        let ref2 = ExternRef::<i32>::from_handle(42);
-        let ref3 = ExternRef::<i32>::from_handle(43);
+        let ref1 = unsafe { ExternRef::<i32>::from_handle(42) };
+        let ref2 = unsafe { ExternRef::<i32>::from_handle(42) };
+        let ref3 = unsafe { ExternRef::<i32>::from_handle(43) };
 
         assert_eq!(ref1, ref2);
         assert_ne!(ref1, ref3);
@@ -1084,7 +1096,7 @@ mod tests {
         let shared_slice = SharedSlice::from_slice(&data).unwrap();
         
         let collected: Vec<_> = shared_slice.into_iter().collect();
-        assert_eq!(collected, vec![&1, &2, &3]);
+        assert_eq!(collected, alloc::vec![&1, &2, &3]);
     }
 
     #[test]

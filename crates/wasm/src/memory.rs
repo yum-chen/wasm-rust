@@ -5,11 +5,14 @@
 //! validation, and scoped arenas for temporary allocations.
 
 use crate::Pod;
-use crate::host::{get_host_capabilities, HostCapabilities};
+use crate::host::{get_host_capabilities};
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use alloc::alloc::{alloc, dealloc, realloc, Layout};
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicUsize, AtomicPtr, Ordering};
+use core::sync::atomic::{AtomicUsize, Ordering};
 use core::marker::PhantomData;
-use core::ops::{Deref, DerefMut, Index, IndexMut};
+use core::ops::{Deref, DerefMut};
 use core::slice;
 
 /// Global memory allocation tracking
@@ -38,7 +41,7 @@ impl<T: Pod> SharedMemory<T> {
         let layout = unsafe { core::alloc::Layout::array::<T>(capacity) }
             .map_err(|_| MemoryError::InvalidSize)?;
         
-        let ptr = unsafe { core::alloc::alloc(layout) as *mut T };
+        let ptr = unsafe { alloc(layout) as *mut T };
         if ptr.is_null() {
             return Err(MemoryError::OutOfMemory);
         }
@@ -108,9 +111,16 @@ impl<T: Pod> SharedMemory<T> {
     }
 
     /// Gets a mutable shared slice view (requires exclusive access)
-    pub fn as_mut_shared_slice(&mut self) -> crate::SharedSliceMut<'_, T> {
+    pub fn as_mut_shared_slice(&mut self) -> Result<&mut [T], crate::WasmError> {
+        let caps = get_host_capabilities();
+        if !caps.threading {
+            return Err(crate::WasmError::ThreadingError(
+                crate::threading::ThreadingError::ThreadingNotSupported
+            ));
+        }
+        
         unsafe {
-            crate::SharedSliceMut::from_raw_parts(self.ptr.as_ptr(), self.len)
+            Ok(core::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len))
         }
     }
 
@@ -123,7 +133,7 @@ impl<T: Pod> SharedMemory<T> {
             return Ok(());
         }
 
-        self.reallocate(new_capacity)
+        unsafe { self.reallocate(new_capacity) }
     }
 
     /// Shrinks the capacity to match the current length
@@ -132,14 +142,14 @@ impl<T: Pod> SharedMemory<T> {
             return Ok(());
         }
 
-        self.reallocate(self.len)
+        unsafe { self.reallocate(self.len) }
     }
 
     unsafe fn reallocate(&mut self, new_capacity: usize) -> Result<(), MemoryError> {
         let new_layout = core::alloc::Layout::array::<T>(new_capacity)
             .map_err(|_| MemoryError::InvalidSize)?;
         
-        let new_ptr = core::alloc::realloc(
+        let new_ptr = realloc(
             self.ptr.as_ptr() as *mut u8,
             core::alloc::Layout::array::<T>(self.capacity)
                 .map_err(|_| MemoryError::InvalidSize)?,
@@ -173,7 +183,7 @@ impl<T: Pod> SharedMemory<T> {
             let layout = core::alloc::Layout::array::<T>(self.capacity)
                 .unwrap_or_else(|_| core::alloc::Layout::new::<T>());
             
-            core::alloc::dealloc(self.ptr.as_ptr() as *mut u8, layout);
+            dealloc(self.ptr.as_ptr() as *mut u8, layout);
             ALLOCATED_MEMORY.fetch_sub(layout.size(), Ordering::Relaxed);
         }
     }
@@ -194,99 +204,6 @@ impl<T: Pod> Clone for SharedMemory<T> {
             capacity: self.capacity,
             ref_count: AtomicUsize::new(self.ref_count()),
             _marker: PhantomData,
-        }
-    }
-}
-
-/// Mutable version of SharedSlice for exclusive access
-pub struct SharedSliceMut<'a, T: Pod> {
-    ptr: NonNull<T>,
-    len: usize,
-    _marker: PhantomData<&'a mut [T]>,
-}
-
-impl<'a, T: Pod> SharedSliceMut<'a, T> {
-    /// Creates a mutable shared slice from raw parts
-    /// 
-    /// # Safety
-    /// The pointer must be valid for `len` elements and must
-    /// point to properly aligned memory.
-    pub unsafe fn from_raw_parts(ptr: *mut T, len: usize) -> Self {
-        Self {
-            ptr: NonNull::new(ptr).expect("null pointer"),
-            len,
-            _marker: PhantomData,
-        }
-    }
-
-    /// Returns the length of the slice
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
-    /// Returns true if the slice is empty
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
-    /// Gets a reference to the element at the given index
-    pub fn get(&self, index: usize) -> Option<&T> {
-        if index < self.len {
-            unsafe { Some(&*self.ptr.as_ptr().add(index)) }
-        } else {
-            None
-        }
-    }
-
-    /// Gets a mutable reference to the element at the given index
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
-        if index < self.len {
-            unsafe { Some(&mut *self.ptr.as_ptr().add(index)) }
-        } else {
-            None
-        }
-    }
-
-    /// Splits the slice into two at the given index
-    pub fn split_at(self, mid: usize) -> (Self, Self) {
-        assert!(mid <= self.len, "split index out of bounds");
-        
-        let left = unsafe {
-            SharedSliceMut::from_raw_parts(self.ptr.as_ptr(), mid)
-        };
-        
-        let right = unsafe {
-            SharedSliceMut::from_raw_parts(
-                self.ptr.as_ptr().add(mid),
-                self.len - mid
-            )
-        };
-        
-        (left, right)
-    }
-
-    /// Converts to immutable shared slice
-    pub fn into_shared_slice(self) -> crate::SharedSlice<'a, T> {
-        unsafe {
-            crate::SharedSlice::from_raw_parts(self.ptr.as_ptr(), self.len)
-        }
-    }
-}
-
-impl<'a, T: Pod> Deref for SharedSliceMut<'a, T> {
-    type Target = [T];
-
-    fn deref(&self) -> &[T] {
-        unsafe {
-            slice::from_raw_parts(self.ptr.as_ptr(), self.len)
-        }
-    }
-}
-
-impl<'a, T: Pod> DerefMut for SharedSliceMut<'a, T> {
-    fn deref_mut(&mut self) -> &mut [T] {
-        unsafe {
-            slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len)
         }
     }
 }
@@ -538,7 +455,7 @@ pub fn allocate_shared(size: usize) -> Result<*mut u8, MemoryError> {
             .map_err(|_| MemoryError::InvalidSize)? 
     };
     
-    let ptr = unsafe { core::alloc::alloc(layout) };
+    let ptr = unsafe { alloc(layout) };
     
     if ptr.is_null() {
         return Err(MemoryError::OutOfMemory);
@@ -557,7 +474,7 @@ pub fn deallocate_shared(ptr: *mut u8, size: usize) {
         };
         
         unsafe {
-            core::alloc::dealloc(ptr, layout);
+            dealloc(ptr, layout);
         }
         
         ALLOCATED_MEMORY.fetch_sub(size, Ordering::Relaxed);
@@ -597,7 +514,7 @@ mod tests {
         
         let slice = shared.as_shared_slice();
         assert_eq!(slice.len(), 4);
-        assert_eq!(slice.get(0), Some(&1u32));
+        assert_eq!(slice.get(0), Ok(&1u32));
     }
 
     #[test]
@@ -610,21 +527,6 @@ mod tests {
         
         shared.remove_ref();
         assert_eq!(shared.ref_count(), 1);
-    }
-
-    #[test]
-    fn test_shared_slice_mut() {
-        let mut data = [1u32, 2u32, 3u32];
-        let mut slice = unsafe {
-            SharedSliceMut::from_raw_parts(data.as_mut_ptr(), data.len())
-        };
-        
-        assert_eq!(slice.len(), 3);
-        assert_eq!(slice.get(0), Some(&1u32));
-        assert_eq!(slice.get_mut(0), Some(&mut 1u32));
-        
-        slice[0] = 42;
-        assert_eq!(data[0], 42);
     }
 
     #[test]
